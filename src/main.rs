@@ -2,18 +2,18 @@
 * File Name         : main.rs
 * Description       : Contains the main entry point of the application
 **************************************************************************************************/
+#![allow(unused_variables)]
 
 pub mod cpu;
+pub mod registers;
 pub mod ppu;
 pub mod memory;
 pub mod opcodes;
 pub mod io;
-pub mod timers;
-pub mod interrupts;
+pub mod interrupts_timers;
 pub mod cartridge;
 #[cfg(feature = "debug")]
 pub mod debugger;
-pub mod utils;
 
 fn main() {
     // Initialize components
@@ -21,8 +21,8 @@ fn main() {
     let mut ppu = ppu::PPU::new();
     let mut memory = memory::Memory::new();
     let mut io = io::IO::new();
-    let mut timers = timers::Timers::new();
-    let mut interrupts = interrupts::Interrupts::new();
+    let mut timers = interrupts_timers::Timers::new();
+    let mut interrupts = interrupts_timers::Interrupts::new();
     let cartridge = cartridge::Cartridge::load("path/to/rom.gb");
 
     // Main emulation loop
