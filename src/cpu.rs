@@ -6,6 +6,11 @@
 use rand::Rng;
 use std::fs::File;
 use std::io::Read;
+use crate::memory::Memory;
+use crate::ppu::PPU;
+use crate::io::IO;
+use crate::timers::Timers;
+use crate::interrupts::Interrupts;
 
 // Screen constants
 //const WIDTH: usize = 160;
@@ -135,7 +140,7 @@ impl Registers {
 }
 
 // Components for the gameboy CPU
-pub struct Cpu {
+pub struct CPU {
     registers: Registers,               // General Putpose Registers reg_a - reg_l
     index: u16,                         // Index Register
     pc: u16,                            // Program Counter
@@ -149,10 +154,10 @@ pub struct Cpu {
 }
 
 // Implementation for the CPU
-impl Cpu {
+impl CPU {
     // Initialization function returning default values for the CPU
     pub fn new() -> Self {
-        let mut cpu = Cpu {
+        let mut cpu = CPU {
             registers: Registers::new(),
             index: 0,
             pc: 0x200,
@@ -181,5 +186,9 @@ impl Cpu {
             }
         }
         Ok(())
+    }
+
+    pub fn step(&mut self, memory: &mut Memory, ppu: &mut PPU, io: &mut IO, timers: &mut Timers, interrupts: &mut Interrupts) {
+        // Fetch, decode, and execute instructions
     }
 }
