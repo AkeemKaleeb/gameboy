@@ -58,15 +58,16 @@ impl std::convert::From<u8> for FlagsRegister {
 }
 
 // General Purpose Registers of the Gameboy
+#[derive(Debug, Default, Clone, Copy)]
 pub struct Registers {
-    pub reg_a: u8,
     pub reg_b: u8,
     pub reg_c: u8,
     pub reg_d: u8,
     pub reg_e: u8,
-    pub reg_f: FlagsRegister,
     pub reg_h: u8,
     pub reg_l: u8,
+    pub reg_a: u8,
+    pub reg_f: FlagsRegister,
 }
 
 // Implementation of the general purpose Registers
@@ -90,14 +91,6 @@ impl Registers {
     // Or's the value with the remaining 8 bits of the second half of the value
     // FFFF 0000 | 0000 FFFF = FFFF FFFF
 
-    pub fn get_af(&self) -> u16 {
-        (self.reg_a as u16) << 8
-        | u8::from(self.reg_f) as u16
-    }
-    pub fn set_af(&mut self, value: u16) {
-        self.reg_a = ((value & 0xFF00) >> 8) as u8;
-        self.reg_f = FlagsRegister::from((value & 0xFF) as u8);
-    }
     pub fn get_bc(&self) -> u16 {
         (self.reg_b as u16) << 8
         | self.reg_c as u16
@@ -121,5 +114,13 @@ impl Registers {
     pub fn set_hl(&mut self, value: u16) {
         self.reg_h = ((value & 0xFF00) >> 8) as u8;
         self.reg_l = (value & 0xFF) as u8;
+    }
+    pub fn get_af(&self) -> u16 {
+        (self.reg_a as u16) << 8
+        | u8::from(self.reg_f) as u16
+    }
+    pub fn set_af(&mut self, value: u16) {
+        self.reg_a = ((value & 0xFF00) >> 8) as u8;
+        self.reg_f = FlagsRegister::from((value & 0xFF) as u8);
     }
 }

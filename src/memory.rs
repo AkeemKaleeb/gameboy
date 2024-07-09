@@ -5,14 +5,14 @@
 
 // Memory map and state
 pub struct Memory {
-    data: [u8; 8192],
+    pub data: [u8; 0xFFFF],
 }
 
 impl Memory {
     // Initialize memory
     pub fn new() -> Self {
         Memory {
-            data: [0; 8192],
+            data: [0; 0xFFFF],
         }
     }
 
