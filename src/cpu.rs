@@ -206,9 +206,9 @@ impl CPU {
             },
             0x30 => match opcode & 0x0F {
                 0x00 => self.jrnc(),
-                0x01 => panic!("Opcode not implemented"),
+                0x01 => self.ldspi(),
                 0x02 => panic!("Opcode not implemented"),
-                0x03 => panic!("Opcode not implemented"),
+                0x03 => self.incsp(),
                 0x04 => panic!("Opcode not implemented"),
                 0x05 => panic!("Opcode not implemented"),
                 0x06 => panic!("Opcode not implemented"),
@@ -216,7 +216,7 @@ impl CPU {
                 0x08 => self.jrc(),
                 0x09 => panic!("Opcode not implemented"),
                 0x0A => self.lda(Register::H, Register::L, false, true),
-                0x0B => panic!("Opcode not implemented"),
+                0x0B => self.decsp(),
                 0x0C => self.inc(Register::A, None),
                 0x0D => self.dec(Register::A, None),
                 0x0E => self.ldi1(Register::A),
@@ -452,7 +452,7 @@ impl CPU {
                 0x00 => panic!("Opcode not implemented"),
                 0x01 => panic!("Opcode not implemented"),
                 0x02 => panic!("Opcode not implemented"),
-                0x03 => panic!("Opcode not implemented"),
+                0x03 => {println!("Opcode not implemented"); self.nop()},
                 0x04 => self.nop(),
                 0x05 => panic!("Opcode not implemented"),
                 0x06 => self.ori(),
@@ -648,6 +648,12 @@ impl CPU {
         self.pc += 1;
     }
 
+    // Decrement SP
+    fn decsp(&mut self) {
+        self.sp = self.sp.wrapping_sub(1);
+        self.pc += 1;
+    }
+
     // Halt CPU
     fn halt(&self) {
         println!("HALT");
@@ -672,6 +678,12 @@ impl CPU {
         self.write_flag(Register::SUB, false);
         self.write_flag(Register::HC, (self.read_register(reg1) & 0x0F) == 0x00);
 
+        self.pc += 1;
+    }
+
+    // Increment SP
+    fn incsp(&mut self) {
+        self.sp = self.sp.wrapping_add(1);
         self.pc += 1;
     }
 
@@ -837,6 +849,16 @@ impl CPU {
         self.pc += 1;
     }
 
+    // Load immediate pair from memory into the stack pointer
+    fn ldspi(&mut self) {
+        let low = self.read_memory(self.pc + 1);
+        let high = self.read_memory(self.pc + 2);
+        let address = ((high as u16) << 8) | low as u16;
+        self.sp = address;
+        self.pc += 3;
+    }
+
+    // No opperation, continue
     fn nop(&mut self) {
         self.pc += 1;
     }

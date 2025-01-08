@@ -57,7 +57,7 @@ impl MMU {
 
     // Load ROM into RAM
     pub fn load_rom(&mut self, rom: &Vec<u8>) {
-        let rom_size = rom.len();
+        let rom_size = self.rom.len();
         let copy_size = rom.len().min(rom_size);
         self.rom[..copy_size].copy_from_slice(&rom[..copy_size]);
     }
