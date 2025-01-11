@@ -10,6 +10,7 @@ pub enum Register {
     E,
     H,
     L,
+    F,
     HL,
     SP,
     PC,
@@ -53,7 +54,7 @@ impl CPU {
             reg_e: 0,
             reg_h: 0,
             reg_l: 0,
-            sp: 0,
+            sp: 0xFFFE,         // Stack Pointer starting address   
             pc: 0x0100,         // Gameboy starting address
             zero: false,
             sub: false,
@@ -63,7 +64,7 @@ impl CPU {
         }
     }
 
-    // Read 8 bit value from register
+    /// Read 8 bit value from register
     pub fn read_register(&self, reg: Register) -> u8 {
         match reg {
             Register::A => self.reg_a,
@@ -73,6 +74,7 @@ impl CPU {
             Register::E => self.reg_e,
             Register::H => self.reg_h,
             Register::L => self.reg_l,
+            Register::F => self.get_flag_register(),
             Register::HL => panic!("HL is a 16-bit register"),
             Register::SP => panic!("SP is a 16-bit register"),
             Register::PC => panic!("PC is a 16-bit register"),
@@ -80,7 +82,7 @@ impl CPU {
         }
     }
 
-    // Read the flag boolean value
+    /// Read the flag boolean value
     pub fn read_flag(&self, flag: Register) -> bool {
         match flag {
             Register::ZERO => self.zero,
@@ -91,7 +93,7 @@ impl CPU {
         }
     }
     
-    // Write 8 bit value to register
+    /// Write 8 bit value to register
     pub fn write_register(&mut self, reg: Register, value: u8) {
         match reg {
             Register::A => self.reg_a = value,
@@ -101,6 +103,7 @@ impl CPU {
             Register::E => self.reg_e = value,
             Register::H => self.reg_h = value,
             Register::L => self.reg_l = value,
+            Register::F => {self.set_flag_register(value);},
             Register::HL => panic!("HL is a 16-bit register"),
             Register::SP => panic!("SP is a 16-bit register"),
             Register::PC => panic!("PC is a 16-bit register"),
@@ -110,8 +113,26 @@ impl CPU {
             Register::CARRY => self.carry = value != 0,
         }
     }
+
+    /// Get the proper flag register
+    fn get_flag_register(&self) -> u8{
+        let mut value = 0;
+        if self.zero { value |= 0b1000_0000; }
+        if self.sub { value |= 0b0100_0000; }
+        if self.hc { value |= 0b0010_0000; }
+        if self.carry { value |= 0b0001_0000; }
+        return value;
+    }
+
+    /// Set the proper flag register
+    fn set_flag_register(&mut self, value: u8) {
+        self.zero = (value & 0b1000_0000) != 0;
+        self.sub = (value & 0b0100_0000) != 0;
+        self.hc = (value & 0b0010_0000) != 0;
+        self.carry = (value & 0b0001_0000) != 0;
+    }
     
-    // Write flag boolean value
+    /// Write flag boolean value
     pub fn write_flag(&mut self, flag: Register, value: bool) {
         match flag {
             Register::ZERO => self.zero = value,
@@ -122,28 +143,28 @@ impl CPU {
         }
     }
 
-    // Read 8 bit value from memory at address
+    /// Read 8 bit value from memory at address
     fn read_memory(&self, address: u16) -> u8 {
         return self.mmu.read_byte(address);
     }
 
-    // Write 8 bit value to memory at address
+    /// Write 8 bit value to memory at address
     fn write_memory(&mut self, address: u16, value: u8) {
         self.mmu.write_byte(address, value);
     }
 
-    // Public instruction to send ROM to MMU
+    /// Public instruction to send ROM to MMU
     pub fn load_rom(&mut self, rom: &Vec<u8>) {
         self.mmu.load_rom(rom);
     }
 
-    // Function to Run ROM by instruction
+    /// Function to Run ROM by instruction
     pub fn step(&mut self) {
         let opcode = self.read_memory(self.pc);
         self.execute(opcode);
     }
 
-    // Get OPCODE and execute the appropriate function
+    /// Get OPCODE and execute the appropriate function
     pub fn execute(&mut self, opcode: u8) {
         println!("\nExecuting Opcode: {:02X}", opcode);
         match opcode & 0xF0 {
@@ -154,8 +175,8 @@ impl CPU {
                 0x03 => self.inc(Register::B, Some(Register::C)),
                 0x04 => self.inc(Register::B, None),
                 0x05 => self.dec(Register::B, None),
-                0x06 => panic!("Opcode not implemented"),
-                0x07 => panic!("Opcode not implemented"),
+                0x06 => self.ldi1(Register::B),
+                0x07 => self.rlca(),
                 0x08 => panic!("Opcode not implemented"),
                 0x09 => panic!("Opcode not implemented"),
                 0x0A => self.lda(Register::B, Register::C, false, false),
@@ -173,8 +194,8 @@ impl CPU {
                 0x03 => self.inc(Register::D, Some(Register::E)),
                 0x04 => self.inc(Register::D, None),
                 0x05 => self.dec(Register::D, None),
-                0x06 => panic!("Opcode not implemented"),
-                0x07 => panic!("Opcode not implemented"),
+                0x06 => self.ldi1(Register::D),
+                0x07 => self.rla(),
                 0x08 => self.jr(),
                 0x09 => panic!("Opcode not implemented"),
                 0x0A => self.lda(Register::D, Register::E, false, false),
@@ -192,7 +213,7 @@ impl CPU {
                 0x03 => self.inc(Register::H, Some(Register::L)),
                 0x04 => self.inc(Register::H, None),
                 0x05 => self.dec(Register::H, None),
-                0x06 => panic!("Opcode not implemented"),
+                0x06 => self.ldi1(Register::H),
                 0x07 => panic!("Opcode not implemented"),
                 0x08 => self.jrz(),
                 0x09 => panic!("Opcode not implemented"),
@@ -223,9 +244,6 @@ impl CPU {
                 0x0F => panic!("Opcode not implemented"),
                 _ => println!("Opcode not implemented: {:02X}", opcode),
             },
-
-            // LOAD INSTRUCTIONS
-            // Load Instructions 1
             0x40 => match opcode & 0x0F {
                 0x00 => self.ld(Register::B, Register::B),
                 0x01 => self.ld(Register::B, Register::C),
@@ -245,7 +263,6 @@ impl CPU {
                 0x0F => self.ld(Register::C, Register::A),
                 _ => println!("Opcode not implemented: {:02X}", opcode),
             },
-            // Load Instructions 2
             0x50 => match opcode & 0x0F {
                 0x00 => self.ld(Register::D, Register::B),
                 0x01 => self.ld(Register::D, Register::C),
@@ -265,7 +282,6 @@ impl CPU {
                 0x0F => self.ld(Register::E, Register::A),
                 _ => println!("Opcode not implemented: {:02X}", opcode),
             },
-            // Load Instructions 3
             0x60 => match opcode & 0x0F {
                 0x00 => self.ld(Register::H, Register::B),
                 0x01 => self.ld(Register::H, Register::C),
@@ -285,7 +301,6 @@ impl CPU {
                 0x0F => self.ld(Register::L, Register::A),
                 _ => println!("Opcode not implemented: {:02X}", opcode),
             },
-            // Load Instructions 4
             0x70 => match opcode & 0x0F {
                 0x00 => self.ld(Register::HL, Register::B),
                 0x01 => self.ld(Register::HL, Register::C),
@@ -305,9 +320,6 @@ impl CPU {
                 0x0F => self.ld(Register::A, Register::A),
                 _ => println!("Opcode not implemented: {:02X}", opcode),
             },
-
-            // MATH INSTRUCTIONS
-            // Add and Add Carry Instructions
             0x80 => match opcode & 0x0F {
                 0x00 => self.add(Register::B),
                 0x01 => self.add(Register::C),
@@ -327,8 +339,6 @@ impl CPU {
                 0x0F => self.adc(Register::A),
                 _ => println!("Opcode not implemented: {:02X}", opcode),
             },
-
-            // Subtract and Subtract Carry Instructions
             0x90 => match opcode & 0x0F {
                 0x00 => self.sub(Register::B),
                 0x01 => self.sub(Register::C),
@@ -348,8 +358,6 @@ impl CPU {
                 0x0F => self.sbc(Register::A),
                 _ => println!("Opcode not implemented: {:02X}", opcode),
             },
-
-            // AND and XOR Instructions
             0xA0 => match opcode & 0x0F {
                 0x00 => self.and(Register::B),
                 0x01 => self.and(Register::C),
@@ -369,8 +377,6 @@ impl CPU {
                 0x0F => self.xor(Register::A),
                 _ => println!("Opcode not implemented: {:02X}", opcode),
             },
-
-            // OR and Compare Instructions
             0xB0 => match opcode & 0x0F {
                 0x00 => self.or(Register::B),
                 0x01 => self.or(Register::C),
@@ -390,57 +396,56 @@ impl CPU {
                 0x0F => self.cp(Register::A),
                 _ => println!("Opcode not implemented: {:02X}", opcode),
             },
-
             0xC0 => match opcode & 0x0F {
-                0x00 => panic!("Opcode not implemented"),
-                0x01 => panic!("Opcode not implemented"),
-                0x02 => panic!("Opcode not implemented"),
+                0x00 => self.retnz(),
+                0x01 => self.pop(Register::B, Register::C),
+                0x02 => self.jpnz(),
                 0x03 => self.jpnz(),
-                0x04 => panic!("Opcode not implemented"),
-                0x05 => panic!("Opcode not implemented"),
+                0x04 => self.callnz(),
+                0x05 => self.push(Register::B, Register::C),
                 0x06 => self.addi(),
                 0x07 => panic!("Opcode not implemented"),
-                0x08 => panic!("Opcode not implemented"),
-                0x09 => panic!("Opcode not implemented"),
+                0x08 => self.retz(),
+                0x09 => self.ret(),
                 0x0A => self.jpz(),
                 0x0B => self.nop(),
-                0x0C => self.adci(),
-                0x0D => panic!("Opcode not implemented"),
+                0x0C => self.callz(),
+                0x0D => self.call(),
                 0x0E => self.adci(),
                 0x0F => panic!("Opcode not implemented"),
                 _ => println!("Opcode not implemented: {:02X}", opcode),
             },
             0xD0 => match opcode & 0x0F {
-                0x00 => panic!("Opcode not implemented"),
-                0x01 => panic!("Opcode not implemented"),
-                0x02 => panic!("Opcode not implemented"),
+                0x00 => self.retnc(),
+                0x01 => self.pop(Register::D, Register::E),
+                0x02 => self.jpnc(),
                 0x03 => self.nop(),
-                0x04 => panic!("Opcode not implemented"),
-                0x05 => panic!("Opcode not implemented"),
+                0x04 => self.callnc(),
+                0x05 => self.push(Register::D, Register::E),
                 0x06 => self.subi(),
                 0x07 => panic!("Opcode not implemented"),
-                0x08 => panic!("Opcode not implemented"),
+                0x08 => self.retc(),
                 0x09 => panic!("Opcode not implemented"),
                 0x0A => self.jpc(),
                 0x0B => self.nop(),
-                0x0C => panic!("Opcode not implemented"),
+                0x0C => self.callc(),
                 0x0D => self.nop(),
                 0x0E => self.sbci(),
                 0x0F => panic!("Opcode not implemented"),
                 _ => println!("Opcode not implemented: {:02X}", opcode),
             },
             0xE0 => match opcode & 0x0F {
-                0x00 => panic!("Opcode not implemented"),
-                0x01 => panic!("Opcode not implemented"),
+                0x00 => self.lda8_a(),
+                0x01 => self.pop(Register::H, Register::L),
                 0x02 => panic!("Opcode not implemented"),
                 0x03 => self.nop(),
                 0x04 => self.nop(),
-                0x05 => panic!("Opcode not implemented"),
+                0x05 => self.push(Register::H, Register::L),
                 0x06 => self.andi(),
                 0x07 => panic!("Opcode not implemented"),
                 0x08 => panic!("Opcode not implemented"),
                 0x09 => panic!("Opcode not implemented"),
-                0x0A => panic!("Opcode not implemented"),
+                0x0A => self.lda16_a(),
                 0x0B => self.nop(),
                 0x0C => self.nop(),
                 0x0D => self.nop(),
@@ -449,17 +454,17 @@ impl CPU {
                 _ => println!("Opcode not implemented: {:02X}", opcode),
             },
             0xF0 => match opcode & 0x0F {
-                0x00 => panic!("Opcode not implemented"),
-                0x01 => panic!("Opcode not implemented"),
+                0x00 => self.lda_a8(),
+                0x01 => self.pop(Register::A, Register::F),
                 0x02 => panic!("Opcode not implemented"),
                 0x03 => {println!("Opcode not implemented"); self.nop()},
                 0x04 => self.nop(),
-                0x05 => panic!("Opcode not implemented"),
+                0x05 => self.push(Register::A, Register::F),
                 0x06 => self.ori(),
                 0x07 => panic!("Opcode not implemented"),
                 0x08 => panic!("Opcode not implemented"),
                 0x09 => panic!("Opcode not implemented"),
-                0x0A => panic!("Opcode not implemented"),
+                0x0A => self.lda_a16(),
                 0x0B => panic!("Opcode not implemented"),
                 0x0C => self.nop(),
                 0x0D => self.nop(),
@@ -472,28 +477,26 @@ impl CPU {
     }
 
     // OPCODE Helper Functions
-    // Function to get the address of an operand from an opcode
-    fn get_jump_address(&self) -> u16 {
+    /// Function to get the address of an operand from an opcode
+    fn get_operand_address(&self) -> u16 {
         let low_byte = self.read_memory(self.pc + 1);
         let high_byte = self.read_memory(self.pc + 2);
         let address = ((high_byte as u16) << 8) | low_byte as u16;
         return address;
     }
 
-    // Get 16-bit address from two registers
+    /// Get 16-bit address from two registers
     fn get_double_register(&self, reg1: Register, reg2: Register) -> u16 {
         (self.read_register(reg1) as u16) << 8 | self.read_register(reg2) as u16
     }
 
-    // Set 16-bit value to two registers
+    /// Set 16-bit value to two registers
     fn set_double_register(&mut self, reg1: Register, reg2: Register, value: u16) {
         self.write_register(reg1, (value >> 8) as u8);
         self.write_register(reg2, value as u8);
     }
 
-    // OPCODES
-    // Arithmetic Instructions
-    // Add reg and carry flag to reg_a, store in reg_a
+    /// Add reg and carry flag to reg_a, store in reg_a
     fn adc(&mut self, reg: Register) {
         let value = self.read_register(reg);
         let carry = self.read_flag(Register::CARRY);
@@ -511,7 +514,7 @@ impl CPU {
         self.pc += 1;
     }
 
-    // Add an immediate 8-bit value and carry flag to the A register
+    /// Add an immediate 8-bit value and carry flag to the A register
     fn adci(&mut self) {
         let value = self.read_memory(self.pc + 1);
         let carry = self.read_flag(Register::CARRY);
@@ -529,7 +532,7 @@ impl CPU {
         self.pc += 1;
     }
     
-    // Add reg to reg_a, store in reg_a
+    /// Add reg to reg_a, store in reg_a
     fn add(&mut self, reg: Register) {
         let value = self.read_register(reg);
         let (result, carry) = self.read_register(Register::A).overflowing_add(value);
@@ -545,7 +548,7 @@ impl CPU {
         self.pc += 1;
     }
 
-    // Add an immediate 8-bit value to the A register
+    /// Add an immediate 8-bit value to the A register
     fn addi(&mut self) {
         let value = self.read_memory(self.pc + 1);
         let (result, carry) = self.read_register(Register::A).overflowing_add(value);
@@ -561,7 +564,7 @@ impl CPU {
         self.pc += 1;
     }
 
-    // AND reg with reg_a, store in reg_a
+    /// AND reg with reg_a, store in reg_a
     fn and(&mut self, reg: Register) {
         // Calulate result
         let value = self.read_register(reg);
@@ -578,7 +581,7 @@ impl CPU {
         self.pc += 1;
     }
 
-    // AND immediate 8-bit value with reg_a, store in reg_a
+    /// AND immediate 8-bit value with reg_a, store in reg_a
     fn andi(&mut self) {
         // Calulate result
         let value = self.read_memory(self.pc + 1);
@@ -595,7 +598,62 @@ impl CPU {
         self.pc += 1;
     }
 
-    // Compare reg with reg_a via reg_a - reg, set Z flag if equal, reg_a is unaffected
+    /// Call subroutinie at address
+    fn call(&mut self) {
+        let address = self.get_operand_address();
+        self.push_pc();
+        self.pc = address;
+    }
+
+    /// Call subroutine if carry is set
+    fn callc(&mut self) {
+        let address = self.get_operand_address();
+        if self.read_flag(Register::CARRY) {
+            self.push_pc();
+            self.pc = address;
+        }
+        else {
+            self.pc += 3;
+        }
+    }
+
+    /// Call subroutine if carry is not set
+    fn callnc(&mut self) {
+        let address = self.get_operand_address();
+        if !(self.read_flag(Register::CARRY)) {
+            self.push_pc();
+            self.pc = address;
+        }
+        else {
+            self.pc += 3;
+        }
+    }
+
+    /// Call subroutine if zero is set
+    fn callz(&mut self) {
+        let address = self.get_operand_address();
+        if self.read_flag(Register::ZERO) {
+            self.push_pc();
+            self.pc = address;
+        }
+        else {
+            self.pc += 3;
+        }
+    }
+
+    /// Call subroutine if zero is not set
+    fn callnz(&mut self) {
+        let address = self.get_operand_address();
+        if !(self.read_flag(Register::ZERO)) {
+            self.push_pc();
+            self.pc = address;
+        }
+        else {
+            self.pc += 3;
+        }
+    }
+
+    /// Compare reg with reg_a via reg_a - reg, set Z flag if equal, reg_a is unaffected
     fn cp(&mut self, reg: Register) {
         // Calulate result
         let value = self.read_register(reg);
@@ -611,7 +669,7 @@ impl CPU {
         self.pc += 1;
     }
 
-    // Compare immediate 8-bit value with reg_a via reg_a - value, set Z flag if equal, reg_a is unaffected
+    /// Compare immediate 8-bit value with reg_a via reg_a - value, set Z flag if equal, reg_a is unaffected
     fn cpi(&mut self) {
         // Calulate result
         let value = self.read_memory(self.pc + 1);
@@ -627,7 +685,7 @@ impl CPU {
         self.pc += 1;
     }
 
-    // Decrement reg1, if reg2 is Some, decrement reg2
+    /// Decrement reg1, if reg2 is Some, decrement reg2
     fn dec(&mut self, reg1: Register, reg2: Option<Register>) {
         match reg2 {
             Some(r2) => {
@@ -648,19 +706,19 @@ impl CPU {
         self.pc += 1;
     }
 
-    // Decrement SP
+    /// Decrement SP
     fn decsp(&mut self) {
         self.sp = self.sp.wrapping_sub(1);
         self.pc += 1;
     }
 
-    // Halt CPU
+    /// Halt CPU
     fn halt(&self) {
         println!("HALT");
         panic!("Implement Halt");
     }
 
-    // Increment reg1, if reg2 is Some, increment reg2
+    /// Increment reg1, if reg2 is Some, increment reg2
     fn inc(&mut self, reg1: Register, reg2: Option<Register>) {
         match reg2 {
             Some(r2) => {
@@ -681,23 +739,23 @@ impl CPU {
         self.pc += 1;
     }
 
-    // Increment SP
+    /// Increment SP
     fn incsp(&mut self) {
         self.sp = self.sp.wrapping_add(1);
         self.pc += 1;
     }
 
     // JUMP INSTRUCTIONS
-    // Jump to address in next 16 bits
+    /// Jump to address in next 16 bits
     fn jp(&mut self) {
-        let address = self.get_jump_address();
+        let address = self.get_operand_address();
         self.pc = address;
 
     }
 
-    // Jump if carry is set
+    /// Jump if carry is set
     fn jpc(&mut self) {
-        let address = self.get_jump_address();
+        let address = self.get_operand_address();
 
         if self.read_flag(Register::CARRY) {
             self.pc = address;
@@ -707,15 +765,15 @@ impl CPU {
         }
     }
 
-    // Jump to address at HL
+    /// Jump to address at HL
     fn jphl(&mut self) {
         let address = self.get_double_register(Register::H, Register::L);
         self.pc = address;
     }
 
-    // Jump if carry is not set
+    /// Jump if carry is not set
     fn jpnc(&mut self) {
-        let address = self.get_jump_address();
+        let address = self.get_operand_address();
 
         if !(self.read_flag(Register::CARRY)) {
             self.pc = address;
@@ -725,10 +783,10 @@ impl CPU {
         }
     }
 
-    // Jump is zero is not set
+    /// Jump is zero is not set
     fn jpnz(&mut self) {
         // Read the 16 bit immediate operand
-        let address = self.get_jump_address();
+        let address = self.get_operand_address();
 
         // Check Zero Flag
         if !(self.read_flag(Register::ZERO)) {
@@ -740,9 +798,9 @@ impl CPU {
         }
     }
 
-    // Jump if zero is set
+    /// Jump if zero is set
     fn jpz(&mut self) {
-        let address = self.get_jump_address();
+        let address = self.get_operand_address();
 
         if !(self.read_flag(Register::ZERO)) {
             self.pc = address;
@@ -752,13 +810,13 @@ impl CPU {
         }
     }
 
-    // Jump relative number of steps in next 16 bits
+    /// Jump relative number of steps in next 16 bits
     fn jr(&mut self) {
         let offset = self.read_memory(self.pc + 1) as i8;
         self.pc = self.pc.wrapping_add(2).wrapping_add(offset as u16);
     }
 
-    // Jump relative if carry is set
+    /// Jump relative if carry is set
     fn jrc(&mut self) {
         let offset = self.read_memory(self.pc + 1) as i8;
         if self.read_flag(Register::CARRY) {
@@ -769,7 +827,7 @@ impl CPU {
         }
     }
 
-    // Jump relative if carry is not set
+    /// Jump relative if carry is not set
     fn jrnc(&mut self) {
         let offset = self.read_memory(self.pc + 1) as i8;
         if !self.read_flag(Register::CARRY) {
@@ -780,7 +838,7 @@ impl CPU {
         }
     }
 
-    // Jump relative is zero is not set
+    /// Jump relative is zero is not set
     fn jrnz(&mut self) {
         let offset = self.read_memory(self.pc + 1) as i8;
         if !self.read_flag(Register::ZERO) {
@@ -791,7 +849,7 @@ impl CPU {
         }
     }
 
-    // Jump relative if zero is set
+    /// Jump relative if zero is set
     fn jrz(&mut self) {
         let offset = self.read_memory(self.pc + 1) as i8;
         if self.read_flag(Register::ZERO) {
@@ -802,37 +860,7 @@ impl CPU {
         }
     }
 
-    // Load reg2 into reg1
-    fn ld(&mut self, reg1: Register, reg2: Register) {
-        let value = self.read_register(reg2);
-        self.write_register(reg1, value);
-        self.pc += 1;
-    }
-
-    // Load immediate 8 bit value into reg
-    fn ldi1(&mut self, reg: Register) {
-        // Get immediate 8 bits
-        let value = self.read_memory(self.pc + 1);
-
-        // Load to proper register
-        self.write_register(reg, value);
-        self.pc += 2;
-    }
-
-    // Load immediate 16 bit value into regs
-    fn ldi2(&mut self, reg1: Register, reg2: Register) {
-        // Get immediate 16 bits
-        let low = self.read_memory(self.pc + 1);
-        let high = self.read_memory(self.pc + 2);
-
-        // Load to proper registers
-        self.write_register(reg1, low);
-        self.write_register(reg2, high);
-        self.pc += 3;
-
-    }
-
-    // Load address from two registers into reg_a, if HL, increment or decrement
+    /// Load address from two registers into reg_a, if HL, increment or decrement
     fn lda(&mut self, reg1: Register, reg2: Register, increment: bool, decrement: bool) {
         let address = self.get_double_register(reg1, reg2);
         let value = self.read_memory(address);
@@ -849,7 +877,67 @@ impl CPU {
         self.pc += 1;
     }
 
-    // Load immediate pair from memory into the stack pointer
+    /// Store the contents of reg_a into 0xFF00 + a8
+    fn lda8_a(&mut self) {
+        let address = 0xFF00 + self.read_memory(self.pc + 1) as u16;
+        self.write_memory(address, self.read_register(Register::A));
+        self.pc += 2;
+    }
+
+    /// Load the contents of 0xFF00 + a8 into reg_a
+    fn lda_a8(&mut self) {
+        let address = 0xFF00 + self.read_memory(self.pc + 1) as u16;
+        let value = self.read_memory(address);
+        self.write_register(Register::A, value);
+        self.pc += 2;
+    }
+
+    /// Load contents of reg_a into given address
+    fn lda16_a(&mut self) {
+        let address = self.get_operand_address();
+        self.write_memory(address, self.read_register(Register::A));
+        self.pc += 3;
+    }
+
+    /// Load contents of given address into reg_a
+    fn lda_a16(&mut self) {
+        let address = self.get_operand_address();
+        let value = self.read_memory(address);
+        self.write_register(Register::A, value);
+        self.pc += 3;
+    }
+
+    /// Load reg2 into reg1
+    fn ld(&mut self, reg1: Register, reg2: Register) {
+        let value = self.read_register(reg2);
+        self.write_register(reg1, value);
+        self.pc += 1;
+    }
+
+    /// Load immediate 8 bit value into reg
+    fn ldi1(&mut self, reg: Register) {
+        // Get immediate 8 bits
+        let value = self.read_memory(self.pc + 1);
+
+        // Load to proper register
+        self.write_register(reg, value);
+        self.pc += 2;
+    }
+
+    /// Load immediate 16 bit value into regs
+    fn ldi2(&mut self, reg1: Register, reg2: Register) {
+        // Get immediate 16 bits
+        let low = self.read_memory(self.pc + 1);
+        let high = self.read_memory(self.pc + 2);
+
+        // Load to proper registers
+        self.write_register(reg1, low);
+        self.write_register(reg2, high);
+        self.pc += 3;
+
+    }
+
+    /// Load immediate pair from memory into the stack pointer
     fn ldspi(&mut self) {
         let low = self.read_memory(self.pc + 1);
         let high = self.read_memory(self.pc + 2);
@@ -858,12 +946,12 @@ impl CPU {
         self.pc += 3;
     }
 
-    // No opperation, continue
+    /// No opperation, continue
     fn nop(&mut self) {
         self.pc += 1;
     }
 
-    // OR reg with reg_a, store in reg_a
+    /// OR reg with reg_a, store in reg_a
     fn or(&mut self, reg: Register) {
         // Calulate result
         let value = self.read_register(reg);
@@ -880,7 +968,7 @@ impl CPU {
         self.pc += 1;
     }
 
-    // OR immediate value with reg_a, store in reg_a
+    /// OR immediate value with reg_a, store in reg_a
     fn ori(&mut self) {
         let value = self.read_memory(self.pc + 1);
         let result = self.read_register(Register::A) | value;
@@ -896,7 +984,127 @@ impl CPU {
         self.pc += 1;
     }
 
-    // Rotate reg_a Right through carry
+    /// Pop value from stack into register pair
+    fn pop(&mut self, reg1: Register, reg2: Register) {
+        let low = self.mmu.read_byte(self.sp);
+        self.sp = self.sp.wrapping_add(1);
+        let high = self.mmu.read_byte(self.sp);
+        self.sp = self.sp.wrapping_add(1);
+        self.write_register(reg1, low);
+        self.write_register(reg2, high);
+    }
+
+    /// Pop value from stack into program counter
+    fn pop_pc(&mut self) {
+        let low = self.mmu.read_byte(self.sp);
+        self.sp = self.sp.wrapping_add(1);
+        let high = self.mmu.read_byte(self.sp);
+        self.sp = self.sp.wrapping_add(1);
+        self.pc = ((high as u16) << 8) | low as u16;
+    }
+
+    /// Push contents of register pair onto stack
+    fn push(&mut self, reg1: Register, reg2: Register) {
+        let high = self.read_register(reg2);
+        let low = self.read_register(reg1);
+        self.sp = self.sp.wrapping_sub(1);
+        self.mmu.write_byte(self.sp, high);
+        self.sp = self.sp.wrapping_sub(1);
+        self.mmu.write_byte(self.sp, low);
+    }
+
+    /// Push program counter onto stack
+    fn push_pc(&mut self) {
+        let pc = self.pc;
+        let high = (pc >> 8) as u8;
+        let low = pc as u8;
+        self.sp = self.sp.wrapping_sub(1);
+        self.mmu.write_byte(self.sp, high);
+        self.sp = self.sp.wrapping_sub(1);
+        self.mmu.write_byte(self.sp, low);
+    }
+
+    /// Return from subroutine
+    fn ret(&mut self) {
+        self.pop_pc();
+    }
+
+    /// Return if carry flag is set
+    fn retc(&mut self) {
+        if self.read_flag(Register::CARRY) {
+            self.pop_pc();
+        }
+        else {
+            self.pc += 1;
+        }
+    }
+
+    /// Return if carry flag is not set
+    fn retnc(&mut self) {
+        if !self.read_flag(Register::CARRY) {
+            self.pop_pc();
+        }
+        else {
+            self.pc += 1;
+        }
+    }
+
+    /// Return if zero flag is not set
+    fn retnz(&mut self) {
+        if !self.read_flag(Register::ZERO) {
+            self.pop_pc();
+        }
+        else {
+            self.pc += 1;
+        }
+    }
+
+    /// Return if zero flag is set
+    fn retz(&mut self) {
+        if self.read_flag(Register::ZERO) {
+            self.pop_pc();
+        }
+        else {
+            self.pc += 1;
+        }
+    }
+
+
+    /// Rotate reg_a Left through carry
+    fn rla(&mut self) {
+        let value = self.read_register(Register::A);
+        let new_carry = (value & 0x80) >> 7;
+        let result = (value << 1) | self.read_flag(Register::CARRY) as u8;
+
+        // Set Flags
+        self.write_flag(Register::ZERO, false);
+        self.write_flag(Register::SUB, false);
+        self.write_flag(Register::HC, false);
+        self.write_flag(Register::CARRY, new_carry == 1);
+
+        // Store result and continue
+        self.write_register(Register::A, result);
+        self.pc += 1;
+    }
+    
+    /// Rotate reg_a Left 
+    fn rlca(&mut self) {
+        let value = self.read_register(Register::A);
+        let new_carry = (value & 0x80) >> 7;
+        let result = (value << 1) | new_carry;
+
+        // Set Flags
+        self.write_flag(Register::ZERO, false);
+        self.write_flag(Register::SUB, false);
+        self.write_flag(Register::HC, false);
+        self.write_flag(Register::CARRY, new_carry == 1);
+
+        // Store result and continue
+        self.write_register(Register::A, result);
+        self.pc += 1;
+    }
+
+    /// Rotate reg_a Right through carry
     fn rra(&mut self) {
         let carry = self.read_flag(Register::CARRY);
         let value = self.read_register(Register::A);
@@ -914,7 +1122,7 @@ impl CPU {
         self.pc += 1;
     }
 
-    // Rotate reg_a Right
+    /// Rotate reg_a Right
     fn rrca(&mut self) {
         let value = self.read_register(Register::A);
         let new_carry = value & 0x01;
@@ -931,7 +1139,7 @@ impl CPU {
         self.pc += 1;
     }
 
-    // Sub reg and carry flag from reg_a, store in reg_a
+    /// Sub reg and carry flag from reg_a, store in reg_a
     fn sbc(&mut self, reg: Register) {
         // Compute Result
         let value = self.read_register(reg);        
@@ -951,7 +1159,7 @@ impl CPU {
         self.pc += 1;
     }
 
-    // Subtract immediate value and carry flag from reg_a
+    /// Subtract immediate value and carry flag from reg_a
     fn sbci(&mut self) {
         // Compute Result
         let value = self.read_memory(self.pc + 1);        
@@ -971,7 +1179,7 @@ impl CPU {
         self.pc += 1;
     }
 
-    // Sub reg from reg_a, store in reg_a
+    /// Sub reg from reg_a, store in reg_a
     fn sub(&mut self, reg: Register) {
         // Compute Result
         let value = self.read_register(reg);
@@ -988,7 +1196,7 @@ impl CPU {
         self.pc += 1;
     }
 
-    // Subtract and immediate value from reg_a
+    /// Subtract and immediate value from reg_a
     fn subi(&mut self) {
         let value = self.read_memory(self.pc + 1);
         let (result, borrow) = self.read_register(Register::A).overflowing_sub(value);
@@ -1004,7 +1212,7 @@ impl CPU {
         self.pc += 1;
     }
 
-    // XOR reg with reg_a, store in reg_a
+    /// XOR reg with reg_a, store in reg_a
     fn xor(&mut self, reg: Register) {
         // Calulate result
         let value = self.read_register(reg);
@@ -1021,7 +1229,7 @@ impl CPU {
         self.pc += 1;
     }
 
-    // XOR with immediate 8-bit value
+    /// XOR with immediate 8-bit value
     fn xori(&mut self) {
         // Calulate result
         let value = self.read_memory(self.pc + 1);

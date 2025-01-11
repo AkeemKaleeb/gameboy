@@ -10,7 +10,7 @@ fn main() {
     let mut cpu = CPU::new();
 
     // Load ROM to Buffer, then load buffer to memory
-    let rom = load_rom("D:\\Programming\\Personal\\Emulators\\gameboy\\roms\\tests\\cpu_instrs.gb");
+    let rom = load_rom("roms\\tests\\cpu_instrs.gb");
     cpu.load_rom(&rom);
     
     loop {
