@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 use crate::mmu::MMU;
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, PartialEq)]
 pub enum Register {
     A,
     B,
@@ -57,7 +57,7 @@ impl CPU {
             reg_e: 0,
             reg_h: 0,
             reg_l: 0,
-            sp: 0xFFFE,         // Stack Pointer starting address   
+            sp: 0xFFFF,         // Stack Pointer starting address   
             pc: 0x0100,         // Gameboy starting address
             zero: false,
             sub: false,
@@ -190,9 +190,30 @@ impl CPU {
         }
     }
 
+    /// Print out the current state of the CPU
+    pub fn log_state(&self, opcode: u8, pc: u16) {
+        print!(
+            "Opcode: {:02X}, PC: {:04X}, A: {:02X}, B: {:02X}, C: {:02X}, D: {:02X}, E: {:02X}, H: {:02X}, L: {:02X}, SP: {:04X}, Z:{} N:{} H:{} C:{}",
+            opcode,
+            pc,
+            self.read_register(Register::A),
+            self.read_register(Register::B),
+            self.read_register(Register::C),
+            self.read_register(Register::D),
+            self.read_register(Register::E),
+            self.read_register(Register::H),
+            self.read_register(Register::L),
+            self.sp,
+            self.read_flag(Register::ZERO),
+            self.read_flag(Register::SUB),
+            self.read_flag(Register::HC),
+            self.read_flag(Register::CARRY),
+        );
+    }
+
     /// Get OPCODE and execute the appropriate function
     pub fn execute(&mut self, opcode: u8) {
-        println!("Executing Opcode: {:02X}", opcode);
+        let pc = self.pc;
         match opcode & 0xF0 {
             0x00 => match opcode & 0x0F {
                 0x00 => self.nop(),
@@ -205,7 +226,7 @@ impl CPU {
                 0x07 => self.rlca(),
                 0x08 => self.ldisp(),
                 0x09 => self.add16(Register::B, Register::C),
-                0x0A => self.lda(Register::B, Register::C, false, false),
+                0x0A => self.lda(Register::B, Register::C),
                 0x0B => self.dec(Register::B, Some(Register::C)),
                 0x0C => self.inc(Register::C, None),
                 0x0D => self.dec(Register::C, None),
@@ -224,7 +245,7 @@ impl CPU {
                 0x07 => self.rla(),
                 0x08 => self.jr(),
                 0x09 => self.add16(Register::D, Register::E),
-                0x0A => self.lda(Register::D, Register::E, false, false),
+                0x0A => self.lda(Register::D, Register::E),
                 0x0B => self.dec(Register::D, Some(Register::E)),
                 0x0C => self.inc(Register::E, None),
                 0x0D => self.dec(Register::E, None),
@@ -243,7 +264,7 @@ impl CPU {
                 0x07 => self.daa(),
                 0x08 => self.jrz(),
                 0x09 => self.add16(Register::H, Register::L),
-                0x0A => self.lda(Register::H, Register::L, true, false),
+                0x0A => self.ldahl(true, false),
                 0x0B => self.dec(Register::H, Some(Register::L)),
                 0x0C => self.inc(Register::L, None),
                 0x0D => self.dec(Register::L, None),
@@ -262,7 +283,7 @@ impl CPU {
                 0x07 => self.scf(),
                 0x08 => self.jrc(),
                 0x09 => self.add16(Register::SP, Register::SP),
-                0x0A => self.lda(Register::H, Register::L, false, true),
+                0x0A => self.ldahl(false, true),
                 0x0B => self.decsp(),
                 0x0C => self.inc(Register::A, None),
                 0x0D => self.dec(Register::A, None),
@@ -500,6 +521,8 @@ impl CPU {
             },
             _ => println!("Opcode not implemented: {:02X}", opcode),
         }
+
+        self.log_state(opcode, pc);
     }
 
     // OPCODE Helper Functions
@@ -521,6 +544,8 @@ impl CPU {
         self.write_register(reg1, (value >> 8) as u8);
         self.write_register(reg2, value as u8);
     }
+
+    // OPCODE Functions
 
     /// Add reg and carry flag to reg_a, store in reg_a
     fn adc(&mut self, reg: Register) {
@@ -578,12 +603,13 @@ impl CPU {
     /// Add reg to reg_a, store in reg_a
     fn add(&mut self, reg: Register) {
         let value = self.read_register(reg);
-        let (result, carry) = self.read_register(Register::A).overflowing_add(value);
+        let a = self.read_register(Register::A);
+        let (result, carry) = a.overflowing_add(value);
         
         // Set flags
         self.write_flag(Register::ZERO, result == 0);
         self.write_flag(Register::SUB, false);
-        self.write_flag(Register::HC, self.read_register(Register::A) & 0x0F < value & 0x0F);
+        self.write_flag(Register::HC, (((a & 0xF) + (value & 0xF))) > 0x0F);
         self.write_flag(Register::CARRY, carry);
         
         // Store result and continue
@@ -622,6 +648,7 @@ impl CPU {
         self.pc += 1;
     }
 
+    /// Add content of immediate 2's complement operand to the stack pointer
     fn addspi(&mut self) {
         let value = self.read_memory(self.pc + 1) as i8;
         let result = self.sp.wrapping_add(value as u16);
@@ -868,13 +895,13 @@ impl CPU {
             None => {
                 let value = self.read_register(reg1).wrapping_add(1);
                 self.write_register(reg1, value);
+
+                // Set Flags
+                self.write_flag(Register::ZERO, self.read_register(reg1) == 0);
+                self.write_flag(Register::SUB, false);
+                self.write_flag(Register::HC, (self.read_register(reg1) & 0x0F) == 0x00);
             }
         }
-
-        // Set Flags
-        self.write_flag(Register::ZERO, self.read_register(reg1) == 0);
-        self.write_flag(Register::SUB, false);
-        self.write_flag(Register::HC, (self.read_register(reg1) & 0x0F) == 0x00);
 
         self.pc += 1;
     }
@@ -1001,17 +1028,24 @@ impl CPU {
     }
 
     /// Load address from two registers into reg_a, if HL, increment or decrement
-    fn lda(&mut self, reg1: Register, reg2: Register, increment: bool, decrement: bool) {
+    fn lda(&mut self, reg1: Register, reg2: Register) {
         let address = self.get_double_register(reg1, reg2);
         let value = self.read_memory(address);
         self.write_register(Register::A, value);
 
-        // Increment or Decrement HL
+        self.pc += 1;
+    }
+
+    fn ldahl(&mut self, increment: bool, decrement: bool) {
+        let address = self.get_double_register(Register::H, Register::L);
+        let value = self.read_memory(address);
+        self.write_register(Register::A, value);
+
         if increment {
-            self.inc(reg1, Some(reg2));
+            self.write_memory(address, value.wrapping_add(1));
         }
         else if decrement {
-            self.dec(reg1, Some(reg2));
+            self.write_memory(address, value.wrapping_sub(1));
         }
 
         self.pc += 1;
@@ -1063,8 +1097,22 @@ impl CPU {
 
     /// Load reg2 into reg1
     fn ld(&mut self, reg1: Register, reg2: Register) {
-        let value = self.read_register(reg2);
-        self.write_register(reg1, value);
+        let value;
+        if reg2 == Register::HL {
+            let address = self.get_double_register(Register::H, Register::L);
+            value = self.read_memory(address);
+        }
+        else {
+            value = self.read_register(reg2);
+        }
+
+        if reg1 == Register::HL {
+            let address = self.get_double_register(Register::H, Register::L);
+            self.write_memory(address, value);
+        }
+        else {
+            self.write_register(reg1, value);
+        }
         self.pc += 1;
     }
 
@@ -1209,8 +1257,6 @@ impl CPU {
         let high = self.mmu.read_byte(self.sp);
         self.sp = self.sp.wrapping_add(1);
         self.pc = ((high as u16) << 8) | low as u16;
-
-        self.pc += 1;
     }
 
     /// Push contents of register pair onto stack
@@ -1235,8 +1281,6 @@ impl CPU {
         self.mmu.write_byte(self.sp, high);
         self.sp = self.sp.wrapping_sub(1);
         self.mmu.write_byte(self.sp, low);
-
-        self.pc += 1;
     }
 
     /// Return from subroutine
@@ -1256,8 +1300,8 @@ impl CPU {
 
     /// Return from interrupt
     fn reti(&mut self) {
-        self.ime = true;
         self.pop_pc();
+        self.ime = true;
     }
 
     /// Return if carry flag is not set
@@ -1332,7 +1376,7 @@ impl CPU {
         let result = (value >> 1) | ((carry as u8) << 7);
 
         // Set Flags
-        self.write_flag(Register::ZERO, result == 0);
+        self.write_flag(Register::ZERO, false);
         self.write_flag(Register::SUB, false);
         self.write_flag(Register::HC, false);
         self.write_flag(Register::CARRY, new_carry == 1);
