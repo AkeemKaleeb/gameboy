@@ -42,6 +42,9 @@ pub struct CPU {
 
     // Memory Management Unit
     mmu: MMU,
+
+    // Interrupt Master Enable
+    ime: bool,
 }
 
 impl CPU {
@@ -61,8 +64,14 @@ impl CPU {
             hc: false,
             carry: false,
             mmu: MMU::new(),
+            ime: true,
         }
     }
+
+    const IE: u16 = 0xFFFF;
+    const IF: u16 = 0xFF0F;
+    const INTERRUPT_VECTORS: [u16; 5] = [0x40, 0x48, 0x50, 0x58, 0x60];
+    const INTERRUPT_MASKS: [u8; 5] = [0x01, 0x02, 0x04, 0x08, 0x10];
 
     /// Read 8 bit value from register
     pub fn read_register(&self, reg: Register) -> u8 {
@@ -75,9 +84,6 @@ impl CPU {
             Register::H => self.reg_h,
             Register::L => self.reg_l,
             Register::F => self.get_flag_register(),
-            Register::HL => panic!("HL is a 16-bit register"),
-            Register::SP => panic!("SP is a 16-bit register"),
-            Register::PC => panic!("PC is a 16-bit register"),
             _ => panic!("Invalid register"),
         }
     }
@@ -104,13 +110,11 @@ impl CPU {
             Register::H => self.reg_h = value,
             Register::L => self.reg_l = value,
             Register::F => {self.set_flag_register(value);},
-            Register::HL => panic!("HL is a 16-bit register"),
-            Register::SP => panic!("SP is a 16-bit register"),
-            Register::PC => panic!("PC is a 16-bit register"),
             Register::ZERO => self.zero = value != 0,
             Register::SUB => self.sub = value != 0,
             Register::HC => self.hc = value != 0,
             Register::CARRY => self.carry = value != 0,
+            _ => panic!("Invalid register"),
         }
     }
 
@@ -160,8 +164,30 @@ impl CPU {
 
     /// Function to Run ROM by instruction
     pub fn step(&mut self) {
+        if self.ime {
+            self.check_interrupts();
+        }
         let opcode = self.read_memory(self.pc);
         self.execute(opcode);
+    }
+
+    fn check_interrupts(&mut self) {
+        let ie = self.mmu.read_byte(Self::IE);
+        let mut if_ = self.mmu.read_byte(Self::IF);
+
+        for (i, &mask) in Self::INTERRUPT_MASKS.iter().enumerate() {
+            if (ie & mask) != 0 && (if_ & mask) != 0 {
+                if_ &= !mask;
+                self.mmu.write_byte(Self::IF, if_);
+
+                self.push_pc();
+
+                self.ime = false;
+
+                self.pc = Self::INTERRUPT_VECTORS[i];
+                break;
+            }
+        }
     }
 
     /// Get OPCODE and execute the appropriate function
@@ -170,78 +196,78 @@ impl CPU {
         match opcode & 0xF0 {
             0x00 => match opcode & 0x0F {
                 0x00 => self.nop(),
-                0x01 => self.ldi2(Register::B, Register::C),
-                0x02 => self.ldi2(Register::B, Register::C),
+                0x01 => self.ldi16(Register::B, Register::C),
+                0x02 => self.ldr_a(Register::B, Register::C, false, false),
                 0x03 => self.inc(Register::B, Some(Register::C)),
                 0x04 => self.inc(Register::B, None),
                 0x05 => self.dec(Register::B, None),
-                0x06 => self.ldi1(Register::B),
+                0x06 => self.ldi(Register::B),
                 0x07 => self.rlca(),
-                0x08 => panic!("Opcode not implemented"),
-                0x09 => panic!("Opcode not implemented"),
+                0x08 => self.ldisp(),
+                0x09 => self.add16(Register::B, Register::C),
                 0x0A => self.lda(Register::B, Register::C, false, false),
                 0x0B => self.dec(Register::B, Some(Register::C)),
                 0x0C => self.inc(Register::C, None),
                 0x0D => self.dec(Register::C, None),
-                0x0E => self.ldi1(Register::C),
+                0x0E => self.ldi(Register::C),
                 0x0F => self.rrca(),
                 _ => println!("Opcode not implemented: {:02X}", opcode),
             },
             0x10 => match opcode & 0x0F {
-                0x00 => panic!("Opcode not implemented"),
-                0x01 => self.ldi2(Register::D, Register::E),
-                0x02 => panic!("Opcode not implemented"),
+                0x00 => self.stop(),
+                0x01 => self.ldi16(Register::D, Register::E),
+                0x02 => self.ldr_a(Register::D, Register::E, false, false),
                 0x03 => self.inc(Register::D, Some(Register::E)),
                 0x04 => self.inc(Register::D, None),
                 0x05 => self.dec(Register::D, None),
-                0x06 => self.ldi1(Register::D),
+                0x06 => self.ldi(Register::D),
                 0x07 => self.rla(),
                 0x08 => self.jr(),
-                0x09 => panic!("Opcode not implemented"),
+                0x09 => self.add16(Register::D, Register::E),
                 0x0A => self.lda(Register::D, Register::E, false, false),
                 0x0B => self.dec(Register::D, Some(Register::E)),
                 0x0C => self.inc(Register::E, None),
                 0x0D => self.dec(Register::E, None),
-                0x0E => self.ldi1(Register::E),
+                0x0E => self.ldi(Register::E),
                 0x0F => self.rra(),
                 _ => println!("Opcode not implemented: {:02X}", opcode),
             },
             0x20 => match opcode & 0x0F {
                 0x00 => self.jrnz(),
-                0x01 => self.ldi2(Register::H, Register::L),
-                0x02 => self.jrnz(),
+                0x01 => self.ldi16(Register::H, Register::L),
+                0x02 => self.ldr_a(Register::H, Register::L, true, false),
                 0x03 => self.inc(Register::H, Some(Register::L)),
                 0x04 => self.inc(Register::H, None),
                 0x05 => self.dec(Register::H, None),
-                0x06 => self.ldi1(Register::H),
-                0x07 => panic!("Opcode not implemented"),
+                0x06 => self.ldi(Register::H),
+                0x07 => self.daa(),
                 0x08 => self.jrz(),
-                0x09 => panic!("Opcode not implemented"),
+                0x09 => self.add16(Register::H, Register::L),
                 0x0A => self.lda(Register::H, Register::L, true, false),
                 0x0B => self.dec(Register::H, Some(Register::L)),
                 0x0C => self.inc(Register::L, None),
                 0x0D => self.dec(Register::L, None),
-                0x0E => self.ldi1(Register::L),
-                0x0F => panic!("Opcode not implemented"),
+                0x0E => self.ldi(Register::L),
+                0x0F => self.cpl(),
                 _ => println!("Opcode not implemented: {:02X}", opcode),
             },
             0x30 => match opcode & 0x0F {
                 0x00 => self.jrnc(),
                 0x01 => self.ldspi(),
-                0x02 => panic!("Opcode not implemented"),
+                0x02 => self.ldr_a(Register::H, Register::L, false, true),
                 0x03 => self.incsp(),
-                0x04 => panic!("Opcode not implemented"),
-                0x05 => panic!("Opcode not implemented"),
-                0x06 => panic!("Opcode not implemented"),
-                0x07 => panic!("Opcode not implemented"),
+                0x04 => self.inc(Register::H, Some(Register::L)),
+                0x05 => self.dec(Register::H, Some(Register::L)),
+                0x06 => self.ldihl(),
+                0x07 => self.scf(),
                 0x08 => self.jrc(),
-                0x09 => panic!("Opcode not implemented"),
+                0x09 => self.add16(Register::SP, Register::SP),
                 0x0A => self.lda(Register::H, Register::L, false, true),
                 0x0B => self.decsp(),
                 0x0C => self.inc(Register::A, None),
                 0x0D => self.dec(Register::A, None),
-                0x0E => self.ldi1(Register::A),
-                0x0F => panic!("Opcode not implemented"),
+                0x0E => self.ldi(Register::A),
+                0x0F => self.ccf(),
                 _ => println!("Opcode not implemented: {:02X}", opcode),
             },
             0x40 => match opcode & 0x0F {
@@ -404,7 +430,7 @@ impl CPU {
                 0x04 => self.callnz(),
                 0x05 => self.push(Register::B, Register::C),
                 0x06 => self.addi(),
-                0x07 => panic!("Opcode not implemented"),
+                0x07 => self.rst(0),
                 0x08 => self.retz(),
                 0x09 => self.ret(),
                 0x0A => self.jpz(),
@@ -412,7 +438,7 @@ impl CPU {
                 0x0C => self.callz(),
                 0x0D => self.call(),
                 0x0E => self.adci(),
-                0x0F => panic!("Opcode not implemented"),
+                0x0F => self.rst(1),
                 _ => println!("Opcode not implemented: {:02X}", opcode),
             },
             0xD0 => match opcode & 0x0F {
@@ -423,53 +449,53 @@ impl CPU {
                 0x04 => self.callnc(),
                 0x05 => self.push(Register::D, Register::E),
                 0x06 => self.subi(),
-                0x07 => panic!("Opcode not implemented"),
+                0x07 => self.rst(2),
                 0x08 => self.retc(),
-                0x09 => panic!("Opcode not implemented"),
+                0x09 => self.reti(),
                 0x0A => self.jpc(),
                 0x0B => self.nop(),
                 0x0C => self.callc(),
                 0x0D => self.nop(),
                 0x0E => self.sbci(),
-                0x0F => panic!("Opcode not implemented"),
+                0x0F => self.rst(3),
                 _ => println!("Opcode not implemented: {:02X}", opcode),
             },
             0xE0 => match opcode & 0x0F {
                 0x00 => self.lda8_a(),
                 0x01 => self.pop(Register::H, Register::L),
-                0x02 => panic!("Opcode not implemented"),
+                0x02 => self.ldca(),
                 0x03 => self.nop(),
                 0x04 => self.nop(),
                 0x05 => self.push(Register::H, Register::L),
                 0x06 => self.andi(),
-                0x07 => panic!("Opcode not implemented"),
-                0x08 => panic!("Opcode not implemented"),
-                0x09 => panic!("Opcode not implemented"),
+                0x07 => self.rst(4),
+                0x08 => self.addspi(),
+                0x09 => self.jphl(),
                 0x0A => self.lda16_a(),
                 0x0B => self.nop(),
                 0x0C => self.nop(),
                 0x0D => self.nop(),
                 0x0E => self.xori(),
-                0x0F => panic!("Opcode not implemented"),
+                0x0F => self.rst(5),
                 _ => println!("Opcode not implemented: {:02X}", opcode),
             },
             0xF0 => match opcode & 0x0F {
                 0x00 => self.lda_a8(),
                 0x01 => self.pop(Register::A, Register::F),
-                0x02 => panic!("Opcode not implemented"),
-                0x03 => {println!("Opcode not implemented"); self.nop()},
+                0x02 => self.ldac(),
+                0x03 => self.di(),
                 0x04 => self.nop(),
                 0x05 => self.push(Register::A, Register::F),
                 0x06 => self.ori(),
-                0x07 => panic!("Opcode not implemented"),
-                0x08 => panic!("Opcode not implemented"),
-                0x09 => panic!("Opcode not implemented"),
+                0x07 => self.rst(6),
+                0x08 => self.ldhlsp8(),
+                0x09 => self.ldsphl(),
                 0x0A => self.lda_a16(),
-                0x0B => panic!("Opcode not implemented"),
+                0x0B => self.ei(),
                 0x0C => self.nop(),
                 0x0D => self.nop(),
                 0x0E => self.cpi(),
-                0x0F => panic!("Opcode not implemented"),
+                0x0F => self.rst(7),
                 _ => println!("Opcode not implemented: {:02X}", opcode),
             },
             _ => println!("Opcode not implemented: {:02X}", opcode),
@@ -581,6 +607,35 @@ impl CPU {
         self.pc += 1;
     }
 
+    /// Add two registers to HL
+    fn add16(&mut self, reg1: Register, reg2: Register) {
+        let value = self.get_double_register(reg1, reg2);
+        let result = self.get_double_register(Register::H, Register::L).wrapping_add(value);
+        self.write_register(Register::H, (result >> 8) as u8);
+        self.write_register(Register::L, result as u8);
+
+        // Set Flags
+        self.write_flag(Register::SUB, false);
+        self.write_flag(Register::HC, (self.get_double_register(Register::H, Register::L) & 0x0FFF) < (value & 0x0FFF));
+        self.write_flag(Register::CARRY, self.get_double_register(Register::H, Register::L) > 0xFFFF - value);
+
+        self.pc += 1;
+    }
+
+    fn addspi(&mut self) {
+        let value = self.read_memory(self.pc + 1) as i8;
+        let result = self.sp.wrapping_add(value as u16);
+        self.sp = result;
+
+        // Set Flags
+        self.write_flag(Register::ZERO, false);
+        self.write_flag(Register::SUB, false);
+        self.write_flag(Register::HC, (self.sp & 0x0F) + ((value as u16) & 0x0F) > 0x0F);
+        self.write_flag(Register::CARRY, (self.sp & 0xFF) + ((value as u16) & 0xFF) > 0xFF);
+
+        self.pc += 2;
+    }
+
     /// AND reg with reg_a, store in reg_a
     fn and(&mut self, reg: Register) {
         // Calulate result
@@ -675,6 +730,14 @@ impl CPU {
         }
     }
 
+    /// Flip carry flag
+    fn ccf(&mut self) {
+        self.write_flag(Register::SUB, false);
+        self.write_flag(Register::HC, false);
+        self.write_flag(Register::CARRY, !self.read_flag(Register::CARRY));
+        self.pc += 1;
+    }
+
     /// Compare reg with reg_a via reg_a - reg, set Z flag if equal, reg_a is unaffected
     fn cp(&mut self, reg: Register) {
         // Calulate result
@@ -707,12 +770,55 @@ impl CPU {
         self.pc += 1;
     }
 
+    /// Get the one's complement of reg_a
+    fn cpl(&mut self) {
+        self.write_register(Register::A, !self.read_register(Register::A));
+        self.write_flag(Register::SUB, true);
+        self.write_flag(Register::HC, true);
+        self.pc += 1;
+    }
+
+    /// Convert reg_a to binary coded decimal after BDC addition and subtraction
+    fn daa(&mut self) {
+        let mut a = self.read_register(Register::A);
+        let mut adjust = 0;
+        let carry = self.read_flag(Register::CARRY);
+        let half_carry = self.read_flag(Register::HC);
+
+        if self.read_flag(Register::SUB) {
+            if half_carry {
+                adjust |= 0x06;
+            }
+            if carry {
+                adjust |= 0x60;
+            }
+            a = a.wrapping_sub(adjust);
+        } else {
+            if half_carry || (a & 0x0F) > 0x09 {
+                adjust |= 0x06;
+            }
+            if carry || a > 0x99 {
+                adjust |= 0x60;
+            }
+            a = a.wrapping_add(adjust);
+        }
+
+        self.write_register(Register::A, a);
+
+        // Set flags
+        self.write_flag(Register::ZERO, a == 0);
+        self.write_flag(Register::HC, false);
+        if adjust >= 0x60 {
+            self.write_flag(Register::CARRY, true);
+        }
+    }
+
     /// Decrement reg1, if reg2 is Some, decrement reg2
     fn dec(&mut self, reg1: Register, reg2: Option<Register>) {
         match reg2 {
             Some(r2) => {
-                let value = self.get_double_register(reg1, r2).wrapping_sub(1);
-                self.set_double_register(reg1, r2, value);
+                let address = self.get_double_register(reg1, r2);
+                self.write_memory(address, self.read_memory(address).wrapping_sub(1));
             },
             None => {
                 let value = self.read_register(reg1).wrapping_sub(1);
@@ -734,6 +840,18 @@ impl CPU {
         self.pc += 1;
     }
 
+    /// Disable Interrupts
+    fn di(&mut self) {
+        self.ime = false;
+        self.pc += 1;
+    }
+
+    /// Enable Interrupts
+    fn ei(&mut self) {
+        self.ime = true;
+        self.pc += 1;
+    }
+
     /// Halt CPU
     fn halt(&self) {
         println!("HALT");
@@ -744,8 +862,8 @@ impl CPU {
     fn inc(&mut self, reg1: Register, reg2: Option<Register>) {
         match reg2 {
             Some(r2) => {
-                let value = self.get_double_register(reg1, r2).wrapping_add(1);
-                self.set_double_register(reg1, r2, value);
+                let address = self.get_double_register(reg1, r2);
+                self.write_memory(address, self.read_memory(address).wrapping_add(1));
             },
             None => {
                 let value = self.read_register(reg1).wrapping_add(1);
@@ -929,6 +1047,20 @@ impl CPU {
         self.pc += 3;
     }
 
+    fn ldr_a(&mut self, reg1: Register, reg2: Register, increment: bool, decrement: bool) {
+        let address = self.get_double_register(reg1, reg2);
+        self.write_memory(address, self.read_register(Register::A));
+        
+        if increment {
+            self.inc(reg1, Some(reg2));
+        }
+        else if decrement {
+            self.dec(reg1, Some(reg2));
+        }
+
+        self.pc += 1;
+    }
+
     /// Load reg2 into reg1
     fn ld(&mut self, reg1: Register, reg2: Register) {
         let value = self.read_register(reg2);
@@ -936,8 +1068,23 @@ impl CPU {
         self.pc += 1;
     }
 
+    /// Store contents of memory specified by c into reg_a
+    fn ldac(&mut self) {
+        let address = 0xFF00 + self.read_register(Register::C) as u16;
+        let value = self.read_memory(address);
+        self.write_register(Register::A, value);
+        self.pc += 1;
+    }
+
+    /// Store contents of reg_a into memory address specified by reg_c
+    fn ldca(&mut self) {
+        let address = 0xFF00 + self.read_register(Register::C) as u16;
+        self.write_memory(address, self.read_register(Register::A));
+        self.pc += 1;
+    }
+
     /// Load immediate 8 bit value into reg
-    fn ldi1(&mut self, reg: Register) {
+    fn ldi(&mut self, reg: Register) {
         // Get immediate 8 bits
         let value = self.read_memory(self.pc + 1);
 
@@ -947,7 +1094,7 @@ impl CPU {
     }
 
     /// Load immediate 16 bit value into regs
-    fn ldi2(&mut self, reg1: Register, reg2: Register) {
+    fn ldi16(&mut self, reg1: Register, reg2: Register) {
         // Get immediate 16 bits
         let low = self.read_memory(self.pc + 1);
         let high = self.read_memory(self.pc + 2);
@@ -956,7 +1103,37 @@ impl CPU {
         self.write_register(reg1, low);
         self.write_register(reg2, high);
         self.pc += 3;
+    }
 
+    /// Load immediate 8 bit value into memory address specified by HL
+    fn ldihl(&mut self) {
+        let value = self.read_memory(self.pc + 1);
+        let address = self.get_double_register(Register::H, Register::L);
+        self.write_memory(address, value);
+        self.pc += 2;
+    }
+
+    /// Add 8-bit signed operand to stack pointer, store result in HL
+    fn ldhlsp8(&mut self) {
+        let value = self.read_memory(self.pc + 1) as i8;
+        let result = self.sp.wrapping_add(value as u16);
+        self.set_double_register(Register::H, Register::L, result);
+
+        // Set Flags
+        self.write_flag(Register::ZERO, false);
+        self.write_flag(Register::SUB, false);
+        self.write_flag(Register::HC, (self.sp & 0x0F) + (value as u16 & 0x0F) > 0x0F);
+        self.write_flag(Register::CARRY, (self.sp & 0xFF) + (value as u16 & 0xFF) > 0xFF);
+
+        self.pc += 2;
+    }
+
+    /// Load stack pointer to memory
+    fn ldisp(&mut self) {
+        let address = self.get_operand_address();
+        self.write_memory(address, self.sp as u8);
+        self.write_memory(address + 1, (self.sp >> 8) as u8);
+        self.pc += 3;
     }
 
     /// Load immediate pair from memory into the stack pointer
@@ -966,6 +1143,13 @@ impl CPU {
         let address = ((high as u16) << 8) | low as u16;
         self.sp = address;
         self.pc += 3;
+    }
+
+    /// Load contents of HL into SP
+    fn ldsphl(&mut self) {
+        let value = self.get_double_register(Register::H, Register::L);
+        self.sp = value;
+        self.pc += 1;
     }
 
     /// No opperation, continue
@@ -1070,6 +1254,12 @@ impl CPU {
         }
     }
 
+    /// Return from interrupt
+    fn reti(&mut self) {
+        self.ime = true;
+        self.pop_pc();
+    }
+
     /// Return if carry flag is not set
     fn retnc(&mut self) {
         if !self.read_flag(Register::CARRY) {
@@ -1169,6 +1359,12 @@ impl CPU {
         self.pc += 1;
     }
 
+    /// Push current counter to stack, jump to address based on the given parameter (0-7)
+    fn rst(&mut self, n: u8) {
+        self.push_pc();
+        self.pc = (n as u16) * 0x08;
+    }
+
     /// Sub reg and carry flag from reg_a, store in reg_a
     fn sbc(&mut self, reg: Register) {
         // Compute Result
@@ -1224,6 +1420,20 @@ impl CPU {
         // Store result and continue
         self.write_register(Register::A, result);
         self.pc += 1;
+    }
+
+    /// Set Carry Flag
+    fn scf(&mut self) {
+        self.write_flag(Register::SUB, false);
+        self.write_flag(Register::HC, false);
+        self.write_flag(Register::CARRY, true);
+        self.pc += 1;
+    }
+
+    /// Stop instruction
+    fn stop(&self) {
+        println!("STOP");
+        panic!("Implement Stop");
     }
 
     /// Subtract and immediate value from reg_a
