@@ -166,7 +166,7 @@ impl CPU {
 
     /// Get OPCODE and execute the appropriate function
     pub fn execute(&mut self, opcode: u8) {
-        println!("\nExecuting Opcode: {:02X}", opcode);
+        println!("Executing Opcode: {:02X}", opcode);
         match opcode & 0xF0 {
             0x00 => match opcode & 0x0F {
                 0x00 => self.nop(),
@@ -498,10 +498,27 @@ impl CPU {
 
     /// Add reg and carry flag to reg_a, store in reg_a
     fn adc(&mut self, reg: Register) {
-        let value = self.read_register(reg);
-        let carry = self.read_flag(Register::CARRY);
-        let (result, carry1) = self.read_register(Register::A).overflowing_add(value);
-        let (result, carry2) = result.overflowing_add(carry as u8);
+        let value;
+        let carry;
+        let mut result;
+        let carry1;
+        let carry2;
+        
+        match reg {
+            Register::HL => {
+                let address = self.get_double_register(Register::H, Register::L);
+                value = self.read_memory(address);
+                carry = self.read_flag(Register::CARRY) as u8;
+                (result, carry1) = self.read_register(Register::A).overflowing_add(value);
+                (result, carry2) = result.overflowing_add(carry as u8);
+            }
+            _ => {
+                value = self.read_register(reg);
+                carry = self.read_flag(Register::CARRY) as u8;
+                (result, carry1) = self.read_register(Register::A).overflowing_add(value);
+                (result, carry2) = result.overflowing_add(carry as u8);
+            }
+        }
         
         // Set flags
         self.write_flag(Register::ZERO, result == 0);
@@ -601,6 +618,7 @@ impl CPU {
     /// Call subroutinie at address
     fn call(&mut self) {
         let address = self.get_operand_address();
+        self.pc += 3;
         self.push_pc();
         self.pc = address;
     }
@@ -609,6 +627,7 @@ impl CPU {
     fn callc(&mut self) {
         let address = self.get_operand_address();
         if self.read_flag(Register::CARRY) {
+            self.pc += 3;
             self.push_pc();
             self.pc = address;
         }
@@ -621,6 +640,7 @@ impl CPU {
     fn callnc(&mut self) {
         let address = self.get_operand_address();
         if !(self.read_flag(Register::CARRY)) {
+            self.pc += 3;
             self.push_pc();
             self.pc = address;
         }
@@ -633,6 +653,7 @@ impl CPU {
     fn callz(&mut self) {
         let address = self.get_operand_address();
         if self.read_flag(Register::ZERO) {
+            self.pc += 3;
             self.push_pc();
             self.pc = address;
         }
@@ -645,6 +666,7 @@ impl CPU {
     fn callnz(&mut self) {
         let address = self.get_operand_address();
         if !(self.read_flag(Register::ZERO)) {
+            self.pc += 3;
             self.push_pc();
             self.pc = address;
         }
@@ -992,6 +1014,8 @@ impl CPU {
         self.sp = self.sp.wrapping_add(1);
         self.write_register(reg1, low);
         self.write_register(reg2, high);
+
+        self.pc += 1;
     }
 
     /// Pop value from stack into program counter
@@ -1001,16 +1025,21 @@ impl CPU {
         let high = self.mmu.read_byte(self.sp);
         self.sp = self.sp.wrapping_add(1);
         self.pc = ((high as u16) << 8) | low as u16;
+
+        self.pc += 1;
     }
 
     /// Push contents of register pair onto stack
     fn push(&mut self, reg1: Register, reg2: Register) {
-        let high = self.read_register(reg2);
-        let low = self.read_register(reg1);
+        let value = self.get_double_register(reg1, reg2);
+        let high = (value >> 8) as u8;
+        let low = value as u8;
         self.sp = self.sp.wrapping_sub(1);
         self.mmu.write_byte(self.sp, high);
         self.sp = self.sp.wrapping_sub(1);
         self.mmu.write_byte(self.sp, low);
+
+        self.pc += 1;
     }
 
     /// Push program counter onto stack
@@ -1022,6 +1051,8 @@ impl CPU {
         self.mmu.write_byte(self.sp, high);
         self.sp = self.sp.wrapping_sub(1);
         self.mmu.write_byte(self.sp, low);
+
+        self.pc += 1;
     }
 
     /// Return from subroutine
@@ -1068,7 +1099,6 @@ impl CPU {
             self.pc += 1;
         }
     }
-
 
     /// Rotate reg_a Left through carry
     fn rla(&mut self) {

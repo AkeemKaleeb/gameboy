@@ -22,17 +22,17 @@ impl MMU {
         }
     }
 
-    // Read a byte from memory
+    /// Read a byte from memory
     pub fn read_byte(&self, address: u16) -> u8 {
         self.memory[address as usize]
     }
 
-    // Write a byte to memory
+    /// Write a byte to memory
     pub fn write_byte(&mut self, address: u16, value: u8) {
         self.memory[address as usize] = value;
     }
 
-    // Load ROM into RAM
+    /// Load ROM into RAM
     pub fn load_rom(&mut self, rom: &Vec<u8>) {
         let rom_size = 0x8000; // ROM size is 32KB
         let copy_size = rom.len().min(rom_size);
