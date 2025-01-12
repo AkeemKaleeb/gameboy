@@ -1,5 +1,4 @@
 use crate::bus::Bus;
-use crate::ppu::PPU;
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -45,15 +44,12 @@ pub struct CPU {
     // Bus System
     bus: Rc<RefCell<Bus>>,
 
-    // Pixel Processing Unit
-    pub ppu: PPU,
-
     // Interrupt Master Enable
     ime: bool,
 }
 
 impl CPU {
-    pub fn new(bus: Rc<RefCell<Bus>>, ppu: PPU) -> CPU {
+    pub fn new(bus: Rc<RefCell<Bus>>) -> CPU {
         CPU {
             reg_a: 0,
             reg_b: 0,
@@ -70,7 +66,6 @@ impl CPU {
             carry: false,
             ime: true,
             bus,
-            ppu,
         }
     }
 
@@ -175,7 +170,6 @@ impl CPU {
         }
         let opcode = self.read_memory(self.pc);
         self.execute(opcode);
-        self.ppu.update(1);
     }
 
     fn check_interrupts(&mut self) {

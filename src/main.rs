@@ -46,10 +46,10 @@ fn main() {
     let mut event_pump = sdl_context.event_pump().unwrap();    
     
     // Create Components
-    let mmu = MMU::new();
-    let bus = Bus::new(mmu);
-    let ppu = PPU::new(bus.clone(), scale_factor);
-    let mut cpu = CPU::new(bus, ppu);
+    let mmu: MMU = MMU::new();
+    let bus: Rc<RefCell<Bus>> = Bus::new(mmu);
+    let mut ppu: PPU = PPU::new(bus.clone(), scale_factor);
+    let mut cpu: CPU = CPU::new(bus);
 
     // Load ROM to Buffer, then load buffer to memory
     //let rom = load_rom("roms\\tests\\01.gb");
@@ -78,7 +78,7 @@ fn main() {
         }
 
         cpu.step();
-        cpu.ppu.render(&mut canvas);
+        ppu.update(1, &mut canvas);
         canvas.present();
 
         ::std::thread::sleep(Duration::from_millis(1000 / 60));
