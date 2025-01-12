@@ -22,4 +22,8 @@ impl Bus {
     pub fn load_rom(&mut self, rom: &Vec<u8>) {
         self.mmu.load_rom(rom);
     }
+
+    pub fn tick(&mut self, cycles: u32) {
+        self.mmu.tick(cycles);
+    }
 }

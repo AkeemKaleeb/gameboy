@@ -170,6 +170,7 @@ impl CPU {
         }
         let opcode = self.read_memory(self.pc);
         self.execute(opcode);
+        self.bus.borrow_mut().tick(1);
     }
 
     fn check_interrupts(&mut self) {
@@ -214,7 +215,7 @@ impl CPU {
 
     /// Get OPCODE and execute the appropriate function
     pub fn execute(&mut self, opcode: u8) {
-        let pc = self.pc;
+        //let pc = self.pc;
         match opcode & 0xF0 {
             0x00 => match opcode & 0x0F {
                 0x00 => self.nop(),
@@ -523,7 +524,7 @@ impl CPU {
             _ => println!("Opcode not implemented: {:02X}", opcode),
         }
 
-        self.log_state(opcode, pc);
+        //self.log_state(opcode, pc);
     }
 
     // OPCODE Helper Functions

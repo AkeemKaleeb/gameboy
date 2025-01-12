@@ -242,7 +242,18 @@ impl PPU {
         self.stat = self.bus.borrow().read_byte(0xFF41);
 
         // Request Interrupts if enabled
-        if (self.stat & 0x20 != 0) && (self.ly == self.lyc)
+        if (self.stat & 0x20 != 0) && (self.ly == self.lyc) {
+            self.bus.borrow_mut().write_byte(0xFF0F, self.bus.borrow().read_byte(0xFF0F) | 0x02);
+        }
+        if (self.stat & 0x10 != 0) && (self.mode == 2) {
+            self.bus.borrow_mut().write_byte(0xFF0F, self.bus.borrow().read_byte(0xFF0F) | 0x02);
+        }
+        if (self.stat & 0x08 != 0) && (self.mode == 1) {
+            self.bus.borrow_mut().write_byte(0xFF0F, self.bus.borrow().read_byte(0xFF0F) | 0x02);
+        }
+        if (self.stat & 0x04 != 0) && (self.mode == 0) {
+            self.bus.borrow_mut().write_byte(0xFF0F, self.bus.borrow().read_byte(0xFF0F) | 0x02);
+        }
     }
 
     fn get_color(&self, color_id: u8, palette: u8) -> Color {

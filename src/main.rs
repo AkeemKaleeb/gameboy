@@ -45,6 +45,8 @@ fn main() {
 
     let mut event_pump = sdl_context.event_pump().unwrap();    
     
+
+
     // Create Components
     let mmu: MMU = MMU::new();
     let bus: Rc<RefCell<Bus>> = Bus::new(mmu);
@@ -52,8 +54,7 @@ fn main() {
     let mut cpu: CPU = CPU::new(bus);
 
     // Load ROM to Buffer, then load buffer to memory
-    //let rom = load_rom("roms\\tests\\01.gb");
-    let rom = vec![0x00; 0x0100];
+    let rom = read_rom("roms\\tests\\01.gb");
     cpu.load_rom(&rom);
     
     'running: loop {
@@ -86,7 +87,7 @@ fn main() {
 }
 
 
-fn load_rom<P: AsRef<Path>>(path: P) -> Vec<u8> {
+fn read_rom<P: AsRef<Path>>(path: P) -> Vec<u8> {
     let mut file = File::open(path).expect("Failed to open ROM file");
     let mut buffer = Vec::new();
     file.read_to_end(&mut buffer).expect("Failed to read ROM file");
