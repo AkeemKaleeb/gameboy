@@ -1,5 +1,7 @@
-#![allow(dead_code)]
-use crate::mmu::MMU;
+use crate::bus::Bus;
+use crate::ppu::PPU;
+use std::cell::RefCell;
+use std::rc::Rc;
 
 #[derive(Copy, Clone, PartialEq)]
 pub enum Register {
@@ -40,15 +42,18 @@ pub struct CPU {
     hc: bool,
     carry: bool,
 
-    // Memory Management Unit
-    mmu: MMU,
+    // Bus System
+    bus: Rc<RefCell<Bus>>,
+
+    // Pixel Processing Unit
+    pub ppu: PPU,
 
     // Interrupt Master Enable
     ime: bool,
 }
 
 impl CPU {
-    pub fn new() -> CPU {
+    pub fn new(bus: Rc<RefCell<Bus>>, ppu: PPU) -> CPU {
         CPU {
             reg_a: 0,
             reg_b: 0,
@@ -63,8 +68,9 @@ impl CPU {
             sub: false,
             hc: false,
             carry: false,
-            mmu: MMU::new(),
             ime: true,
+            bus,
+            ppu,
         }
     }
 
@@ -149,17 +155,17 @@ impl CPU {
 
     /// Read 8 bit value from memory at address
     fn read_memory(&self, address: u16) -> u8 {
-        return self.mmu.read_byte(address);
+        return self.bus.borrow().read_byte(address);
     }
 
     /// Write 8 bit value to memory at address
     fn write_memory(&mut self, address: u16, value: u8) {
-        self.mmu.write_byte(address, value);
+        self.bus.borrow_mut().write_byte(address, value);
     }
 
     /// Public instruction to send ROM to MMU
     pub fn load_rom(&mut self, rom: &Vec<u8>) {
-        self.mmu.load_rom(rom);
+        self.bus.borrow_mut().load_rom(rom);
     }
 
     /// Function to Run ROM by instruction
@@ -169,16 +175,17 @@ impl CPU {
         }
         let opcode = self.read_memory(self.pc);
         self.execute(opcode);
+        self.ppu.update(1);
     }
 
     fn check_interrupts(&mut self) {
-        let ie = self.mmu.read_byte(Self::IE);
-        let mut if_ = self.mmu.read_byte(Self::IF);
+        let ie = self.bus.borrow().read_byte(Self::IE);
+        let mut if_ = self.bus.borrow().read_byte(Self::IF);
 
         for (i, &mask) in Self::INTERRUPT_MASKS.iter().enumerate() {
             if (ie & mask) != 0 && (if_ & mask) != 0 {
                 if_ &= !mask;
-                self.mmu.write_byte(Self::IF, if_);
+                self.bus.borrow_mut().write_byte(Self::IF, if_);
 
                 self.push_pc();
 
@@ -1240,9 +1247,9 @@ impl CPU {
 
     /// Pop value from stack into register pair
     fn pop(&mut self, reg1: Register, reg2: Register) {
-        let low = self.mmu.read_byte(self.sp);
+        let low = self.bus.borrow().read_byte(self.sp);
         self.sp = self.sp.wrapping_add(1);
-        let high = self.mmu.read_byte(self.sp);
+        let high = self.bus.borrow().read_byte(self.sp);
         self.sp = self.sp.wrapping_add(1);
         self.write_register(reg1, low);
         self.write_register(reg2, high);
@@ -1252,9 +1259,9 @@ impl CPU {
 
     /// Pop value from stack into program counter
     fn pop_pc(&mut self) {
-        let low = self.mmu.read_byte(self.sp);
+        let low = self.bus.borrow().read_byte(self.sp);
         self.sp = self.sp.wrapping_add(1);
-        let high = self.mmu.read_byte(self.sp);
+        let high = self.bus.borrow().read_byte(self.sp);
         self.sp = self.sp.wrapping_add(1);
         self.pc = ((high as u16) << 8) | low as u16;
     }
@@ -1265,9 +1272,9 @@ impl CPU {
         let high = (value >> 8) as u8;
         let low = value as u8;
         self.sp = self.sp.wrapping_sub(1);
-        self.mmu.write_byte(self.sp, high);
+        self.bus.borrow_mut().write_byte(self.sp, high);
         self.sp = self.sp.wrapping_sub(1);
-        self.mmu.write_byte(self.sp, low);
+        self.bus.borrow_mut().write_byte(self.sp, low);
 
         self.pc += 1;
     }
@@ -1278,9 +1285,9 @@ impl CPU {
         let high = (pc >> 8) as u8;
         let low = pc as u8;
         self.sp = self.sp.wrapping_sub(1);
-        self.mmu.write_byte(self.sp, high);
+        self.bus.borrow_mut().write_byte(self.sp, high);
         self.sp = self.sp.wrapping_sub(1);
-        self.mmu.write_byte(self.sp, low);
+        self.bus.borrow_mut().write_byte(self.sp, low);
     }
 
     /// Return from subroutine

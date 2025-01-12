@@ -5,17 +5,21 @@ extern crate sdl2;
 mod cpu;
 mod mmu;
 mod ppu;
+mod bus;
 
 use sdl2::pixels::Color;
-use sdl2::rect::Rect;
 use sdl2::event::Event;
 use sdl2::keyboard::Keycode;
 use std::time::Duration;
+use bus::Bus;
 use cpu::CPU;
 use ppu::PPU;
+use mmu::MMU;
 use std::fs::File;
 use std::io::{self, Read, Write};
 use std::path::Path;
+use std::cell::RefCell;
+use std::rc::Rc;
 
 
 fn main() {
@@ -42,16 +46,15 @@ fn main() {
     let mut event_pump = sdl_context.event_pump().unwrap();    
     
     // Create Components
-    let mut cpu = CPU::new();
-    let mut ppu = PPU::new();
+    let mmu = MMU::new();
+    let bus = Bus::new(mmu);
+    let ppu = PPU::new(bus.clone(), scale_factor);
+    let mut cpu = CPU::new(bus, ppu);
 
     // Load ROM to Buffer, then load buffer to memory
     //let rom = load_rom("roms\\tests\\01.gb");
     let rom = vec![0x00; 0x0100];
     cpu.load_rom(&rom);
-
-    // cpu.log_state(0x00, 0x0100);
-    // println!();
     
     'running: loop {
         for event in event_pump.poll_iter() {
@@ -63,7 +66,9 @@ fn main() {
                 Event::Window { win_event, .. } => {
                     match win_event {
                         sdl2::event::WindowEvent::Resized(width, height) => {
-                            canvas.set_logical_size(width as u32, height as u32).unwrap();
+                            let new_width = (width as f32 / scale_factor as f32).round() as u32;
+                            let new_height = (height as f32 / scale_factor as f32).round() as u32;
+                            canvas.set_logical_size(new_width, new_height).unwrap();
                         },
                         _ => {}
                     }
@@ -72,10 +77,8 @@ fn main() {
             }
         }
 
-        //cpu.step();
-        ppu.update(1);
-        ppu.render(&mut canvas);
-
+        cpu.step();
+        cpu.ppu.render(&mut canvas);
         canvas.present();
 
         ::std::thread::sleep(Duration::from_millis(1000 / 60));
