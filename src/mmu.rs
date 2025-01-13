@@ -1,3 +1,5 @@
+use std::io::{self, Write};
+
 pub struct MMU {
     rom: Vec<u8>,       // 0000-7FFF: 32KB ROM
     vram: Vec<u8>,      // 8000-9FFF: 8KB Video RAM (VRAM)
@@ -13,6 +15,26 @@ pub struct MMU {
     tima: u8,           // Timer Counter
     tma: u8,            // Timer Modulo
     tac: u8,            // Timer Control
+
+    // Serial Transfer Registers
+    sb: u8,             // Serial Transfer Data
+    sc: u8,             // Serial Transfer Control
+}
+
+pub struct RomMetadata {
+    pub title: String,
+    pub manufacturer_code: String,
+    pub cgb_flag: u8,
+    pub new_licensee_code: String,
+    pub sgb_flag: u8,
+    pub cartridge_type: u8,
+    pub rom_size: u8,
+    pub ram_size: u8,
+    pub destination_code: u8,
+    pub old_licensee_code: u8,
+    pub version_number: u8,
+    pub header_checksum: u8,
+    pub global_checksum: u16,
 }
 
 impl MMU {
@@ -31,6 +53,9 @@ impl MMU {
             tima: 0,                    // Initialize Timer Counter
             tma: 0,                     // Initialize Timer Modulo
             tac: 0,                     // Initialize Timer Control
+
+            sb: 0,                      // Initialize Serial Transfer Data
+            sc: 0,                      // Initialize Serial Transfer Control
         }
     }
 
@@ -61,6 +86,13 @@ impl MMU {
             0xA000..=0xBFFF => self.eram[(address - 0xA000) as usize] = value,
             0xC000..=0xDFFF => self.wram[(address - 0xC000) as usize] = value,
             0xFE00..=0xFE9F => self.oam[(address - 0xFE00) as usize] = value,
+            0xFF01 => self.sb = value,
+            0xFF02 => {
+                self.sc = value;
+                if value == 0x81 {
+                    self.handle_serial_transfer();
+                }
+            },
             0xFF04 => self.div = 0, 
             0xFF05 => self.tima = value,
             0xFF06 => self.tma = value,
@@ -73,11 +105,28 @@ impl MMU {
     }
 
     /// Load ROM into RAM
-    pub fn load_rom(&mut self, rom: &Vec<u8>) {
+    pub fn load_rom(&mut self, rom: &Vec<u8>) -> RomMetadata {
         let rom_size = 0x8000; // ROM size is 32KB
         let copy_size = rom.len().min(rom_size);
         self.rom[..copy_size].copy_from_slice(&rom[..copy_size]);
-        //println!("ROM loaded: {:?}", &self.rom[..rom_size]);
+
+        // Parse ROM metadata
+        let mut metadata = RomMetadata::new();
+        metadata.title = String::from_utf8_lossy(&rom[0x0134..0x0143]).to_string();
+        metadata.manufacturer_code = String::from_utf8_lossy(&rom[0x013F..0x0143]).to_string();
+        metadata.cgb_flag = rom[0x0143];
+        metadata.new_licensee_code = String::from_utf8_lossy(&rom[0x0144..0x0145]).to_string();
+        metadata.sgb_flag = rom[0x0146];
+        metadata.cartridge_type = rom[0x0147];
+        metadata.rom_size = rom[0x0148];
+        metadata.ram_size = rom[0x0149];
+        metadata.destination_code = rom[0x014A];
+        metadata.old_licensee_code = rom[0x014B];
+        metadata.version_number = rom[0x014C];
+        metadata.header_checksum = rom[0x014D];
+        metadata.global_checksum = ((rom[0x014E] as u16) << 8) | (rom[0x014F] as u16);
+
+        metadata
     }
 
     /// Update Timers
@@ -108,5 +157,30 @@ impl MMU {
     /// Request an interrupt
     pub fn request_interrupt(&mut self, interrupt: u8) {
         self.io_ports[0x0F] |= 1 << interrupt;
+    }
+
+    fn handle_serial_transfer(&self) {
+        print!("{}", self.io_ports[0x01] as char);
+        io::stdout().flush().unwrap();
+    }
+}
+
+impl RomMetadata {
+    pub fn new() -> RomMetadata {
+        RomMetadata {
+            title: String::new(),
+            manufacturer_code: String::new(),
+            cgb_flag: 0,
+            new_licensee_code: String::new(),
+            sgb_flag: 0,
+            cartridge_type: 0,
+            rom_size: 0,
+            ram_size: 0,
+            destination_code: 0,
+            old_licensee_code: 0,
+            version_number: 0,
+            header_checksum: 0,
+            global_checksum: 0,
+        }
     }
 }

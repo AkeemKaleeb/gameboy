@@ -1,6 +1,6 @@
 use std::cell::RefCell;
 use std::rc::Rc;
-use crate::mmu::MMU;
+use crate::mmu::{RomMetadata, MMU};
 
 pub struct Bus {
     mmu: MMU,
@@ -19,8 +19,8 @@ impl Bus {
         self.mmu.write_byte(address, value);
     }
 
-    pub fn load_rom(&mut self, rom: &Vec<u8>) {
-        self.mmu.load_rom(rom);
+    pub fn load_rom(&mut self, rom: &Vec<u8>) -> RomMetadata {
+        return self.mmu.load_rom(rom);
     }
 
     pub fn tick(&mut self, cycles: u32) {

@@ -54,8 +54,9 @@ fn main() {
     let mut cpu: CPU = CPU::new(bus);
 
     // Load ROM to Buffer, then load buffer to memory
-    let rom = read_rom("roms\\tests\\01.gb");
-    cpu.load_rom(&rom);
+    let rom = read_rom("roms\\tests\\09.gb");
+    let metadata = cpu.load_rom(&rom);
+    //print_metadata(&metadata);
     
     'running: loop {
         for event in event_pump.poll_iter() {
@@ -79,8 +80,9 @@ fn main() {
         }
 
         cpu.step();
-        ppu.update(1, &mut canvas);
-        canvas.present();
+        wait_for_enter();
+        //ppu.update(1, &mut canvas);
+        //canvas.present();
 
         ::std::thread::sleep(Duration::from_millis(1000 / 60));
     }
@@ -99,4 +101,20 @@ fn wait_for_enter() {
     let mut input = String::new();
     io::stdout().flush().unwrap(); // Ensure the prompt is printed before waiting for input
     io::stdin().read_line(&mut input).unwrap();
+}
+
+fn print_metadata(metadata: &mmu::RomMetadata) {
+    println!("Title: {}", metadata.title);
+    println!("Manufacturer Code: {}", metadata.manufacturer_code);
+    println!("CGB Flag: {}", metadata.cgb_flag);
+    println!("New Licensee Code: {}", metadata.new_licensee_code);
+    println!("SGB Flag: {}", metadata.sgb_flag);
+    println!("Cartridge Type: {}", metadata.cartridge_type);
+    println!("ROM Size: {}", metadata.rom_size);
+    println!("RAM Size: {}", metadata.ram_size);
+    println!("Destination Code: {}", metadata.destination_code);
+    println!("Old Licensee Code: {}", metadata.old_licensee_code);
+    println!("Version Number: {}", metadata.version_number);
+    println!("Header Checksum: {}", metadata.header_checksum);
+    println!("Global Checksum: {}", metadata.global_checksum);
 }
