@@ -1,4 +1,6 @@
 #![allow(dead_code)]
+#![allow(unused_imports)]
+#![allow(unused_labels)]
 
 extern crate sdl2;
 
@@ -46,7 +48,6 @@ fn main() {
     let mut event_pump = sdl_context.event_pump().unwrap();    
     */
 
-
     // Create Components
     let mmu: MMU = MMU::new();
     let bus: Rc<RefCell<Bus>> = Bus::new(mmu);
@@ -54,8 +55,8 @@ fn main() {
     let mut cpu: CPU = CPU::new(bus);
 
     // Load ROM to Buffer, then load buffer to memory
-    let rom = read_rom("roms\\tests\\cpu_instrs.gb");
-    let metadata = cpu.load_rom(&rom);
+    let rom = read_rom("roms\\tests\\03.gb");
+    let _metadata = cpu.load_rom(&rom);
     //print_metadata(&metadata);
     
     'running: loop {
