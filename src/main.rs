@@ -24,7 +24,7 @@ use std::rc::Rc;
 
 fn main() {
     // Initialize SDL2
-    let sdl_context = sdl2::init().unwrap();
+    /*let sdl_context = sdl2::init().unwrap();
     let video_subsystem = sdl_context.video().unwrap();
 
     let scale_factor = 4;
@@ -44,22 +44,22 @@ fn main() {
     canvas.present();
 
     let mut event_pump = sdl_context.event_pump().unwrap();    
-    
+    */
 
 
     // Create Components
     let mmu: MMU = MMU::new();
     let bus: Rc<RefCell<Bus>> = Bus::new(mmu);
-    let mut ppu: PPU = PPU::new(bus.clone(), scale_factor);
+    //let mut ppu: PPU = PPU::new(bus.clone(), scale_factor);
     let mut cpu: CPU = CPU::new(bus);
 
     // Load ROM to Buffer, then load buffer to memory
-    let rom = read_rom("roms\\tests\\09.gb");
+    let rom = read_rom("roms\\tests\\cpu_instrs.gb");
     let metadata = cpu.load_rom(&rom);
     //print_metadata(&metadata);
     
     'running: loop {
-        for event in event_pump.poll_iter() {
+        /*for event in event_pump.poll_iter() {
             match event {
                 Event::Quit {..} |
                 Event::KeyDown { keycode: Some(Keycode::Escape), .. }=> {
@@ -77,10 +77,10 @@ fn main() {
                 }
                 _ => {}
             }
-        }
+        }*/
 
         cpu.step();
-        wait_for_enter();
+        //wait_for_enter();
         //ppu.update(1, &mut canvas);
         //canvas.present();
 

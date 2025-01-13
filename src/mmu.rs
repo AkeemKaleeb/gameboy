@@ -9,16 +9,6 @@ pub struct MMU {
     io_ports: Vec<u8>,  // FF00-FF7F: I/O Ports
     hram: Vec<u8>,      // FF80-FFFE: High RAM (HRAM)
     ie_register: u8,    // FFFF: Interrupt Enable Register
-
-    // Timer Registers
-    div: u8,            // Divider Register
-    tima: u8,           // Timer Counter
-    tma: u8,            // Timer Modulo
-    tac: u8,            // Timer Control
-
-    // Serial Transfer Registers
-    sb: u8,             // Serial Transfer Data
-    sc: u8,             // Serial Transfer Control
 }
 
 pub struct RomMetadata {
@@ -38,6 +28,15 @@ pub struct RomMetadata {
 }
 
 impl MMU {
+    const JOYP: u16 = 0xFF00;
+    const SB: u16 = 0xFF01;
+    const SC: u16 = 0xFF02;
+    const DIV: u16 = 0xFF04;
+    const TIMA: u16 = 0xFF05;
+    const TMA: u16 = 0xFF06;
+    const TAC: u16 = 0xFF07;
+    const IF: u16 = 0xFF0F;
+    
     pub fn new() -> MMU {
         MMU {
             rom: vec![0; 0x8000],       // Initialize 32KB of ROM
@@ -48,14 +47,6 @@ impl MMU {
             io_ports: vec![0; 0x80],    // Initialize I/O Ports
             hram: vec![0; 0x7F],        // Initialize High RAM
             ie_register: 0,             // Initialize Interrupt Enable Register
-
-            div: 0,                     // Initialize Divider Register
-            tima: 0,                    // Initialize Timer Counter
-            tma: 0,                     // Initialize Timer Modulo
-            tac: 0,                     // Initialize Timer Control
-
-            sb: 0,                      // Initialize Serial Transfer Data
-            sc: 0,                      // Initialize Serial Transfer Control
         }
     }
 
@@ -67,11 +58,7 @@ impl MMU {
             0xA000..=0xBFFF => self.eram[(address - 0xA000) as usize],
             0xC000..=0xDFFF => self.wram[(address - 0xC000) as usize],
             0xFE00..=0xFE9F => self.oam[(address - 0xFE00) as usize],
-            0xFF04 => self.div, 
-            0xFF05 => self.tima,
-            0xFF06 => self.tma,
-            0xFF07 => self.tac,
-            0xFF08..=0xFF7F => self.io_ports[(address - 0xFF00) as usize],
+            0xFF00..=0xFF7F => self.io_ports[(address - 0xFF00) as usize],
             0xFF80..=0xFFFE => self.hram[(address - 0xFF80) as usize],
             0xFFFF => self.ie_register,
             _ => 0, // Not usable or mirrored regions
@@ -86,18 +73,12 @@ impl MMU {
             0xA000..=0xBFFF => self.eram[(address - 0xA000) as usize] = value,
             0xC000..=0xDFFF => self.wram[(address - 0xC000) as usize] = value,
             0xFE00..=0xFE9F => self.oam[(address - 0xFE00) as usize] = value,
-            0xFF01 => self.sb = value,
-            0xFF02 => {
-                self.sc = value;
-                if value == 0x81 {
+            0xFF00..=0xFF7F => {
+                self.io_ports[(address - 0xFF00) as usize] = value;
+                if address == Self::SC && value == 0x81 {
                     self.handle_serial_transfer();
                 }
-            },
-            0xFF04 => self.div = 0, 
-            0xFF05 => self.tima = value,
-            0xFF06 => self.tma = value,
-            0xFF07 => self.tac = value,
-            0xFF08..=0xFF7F => self.io_ports[(address - 0xFF00) as usize] = value,
+            }    
             0xFF80..=0xFFFE => self.hram[(address - 0xFF80) as usize] = value,
             0xFFFF => self.ie_register = value,
             _ => {}, // Not usable or mirrored regions
@@ -126,17 +107,50 @@ impl MMU {
         metadata.header_checksum = rom[0x014D];
         metadata.global_checksum = ((rom[0x014E] as u16) << 8) | (rom[0x014F] as u16);
 
+        // Load Initial Memory Values
+        self.write_byte(0xFF05, 0x00);  // TIMA
+        self.write_byte(0xFF06, 0x00);  // TMA
+        self.write_byte(0xFF07, 0x00);  // TAC
+        self.write_byte(0xFF10, 0x80);  // NR10
+        self.write_byte(0xFF11, 0xBF);  // NR11
+        self.write_byte(0xFF12, 0xF3);  // NR12
+        self.write_byte(0xFF14, 0xBF);  // NR14
+        self.write_byte(0xFF16, 0x3F);  // NR21
+        self.write_byte(0xFF17, 0x00);  // NR22
+        self.write_byte(0xFF19, 0xBF);  // NR24
+        self.write_byte(0xFF1A, 0x7F);  // NR30
+        self.write_byte(0xFF1B, 0xFF);  // NR31
+        self.write_byte(0xFF1C, 0x9F);  // NR32
+        self.write_byte(0xFF1E, 0xBF);  // NR33
+        self.write_byte(0xFF20, 0xFF);  // NR41
+        self.write_byte(0xFF21, 0x00);  // NR42
+        self.write_byte(0xFF22, 0x00);  // NR43
+        self.write_byte(0xFF23, 0xBF);  // NR44
+        self.write_byte(0xFF24, 0x77);  // NR50
+        self.write_byte(0xFF25, 0xF3);  // NR51
+        self.write_byte(0xFF26, 0xF1);  // NR52 - GB, 0xF0 - SGB
+        self.write_byte(0xFF40, 0x91);  // LCDC
+        self.write_byte(0xFF42, 0x00);  // SCY
+        self.write_byte(0xFF43, 0x00);  // SCX
+        self.write_byte(0xFF45, 0x00);  // LYC
+        self.write_byte(0xFF47, 0xFC);  // BGP
+        self.write_byte(0xFF48, 0xFF);  // OBP0
+        self.write_byte(0xFF49, 0xFF);  // OBP1
+        self.write_byte(0xFF4A, 0x00);  // WY
+        self.write_byte(0xFF4B, 0x00);  // WX
+        self.write_byte(0xFFFF, 0x00);  // IE
+
         metadata
     }
 
     /// Update Timers
     pub fn tick(&mut self, cycles: u32) {
         // Update Divider Register
-        self.div = self.div.wrapping_add((cycles / 256) as u8);
+        self.write_byte(Self::DIV, self.read_byte(Self::DIV).wrapping_add((cycles / 256) as u8));
 
         // Update Timer Counter
-        if self.tac & 0x04 != 0 {
-            let timer_freq = match self.tac & 0x03 {
+        if self.read_byte(Self::TAC) & 0x04 != 0 {
+            let timer_freq = match Self::TAC & 0x03 {
                 0 => 1024,      // 4096 Hz
                 1 => 16,        // 262144 Hz
                 2 => 64,        // 65536 Hz
@@ -145,9 +159,9 @@ impl MMU {
             };
 
             if cycles % timer_freq == 0 {
-                self.tima = self.tima.wrapping_add(1);
-                if self.tima == 0 {
-                    self.tima = self.tma;
+                self.write_byte(Self::TIMA, self.read_byte(Self::TIMA.wrapping_add(1)));
+                if self.read_byte(Self::TIMA) == 0 {
+                    self.write_byte(Self::TIMA, self.read_byte(Self::TMA));
                     self.request_interrupt(2);
                 }
             }
@@ -156,12 +170,15 @@ impl MMU {
 
     /// Request an interrupt
     pub fn request_interrupt(&mut self, interrupt: u8) {
-        self.io_ports[0x0F] |= 1 << interrupt;
+        let mut interrupt_flag = self.read_byte(Self::IF);
+        interrupt_flag |= 1 << interrupt;
+        self.write_byte(Self::IF, interrupt_flag);
     }
 
     fn handle_serial_transfer(&self) {
-        print!("{}", self.io_ports[0x01] as char);
+        print!("{}", self.read_byte(Self::SB) as char);
         io::stdout().flush().unwrap();
+        std::process::exit(0);
     }
 }
 

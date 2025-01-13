@@ -33,8 +33,8 @@ pub struct CPU {
     reg_l: u8,
 
     // 16 Bit Registers
-    sp: u16,
     pc: u16,
+    sp: u16,
 
     // Flags
     zero: bool,
@@ -52,16 +52,16 @@ pub struct CPU {
 impl CPU {
     pub fn new(bus: Rc<RefCell<Bus>>) -> CPU {
         CPU {
-            reg_a: 0,
-            reg_b: 0,
-            reg_c: 0,
-            reg_d: 0,
-            reg_e: 0,
-            reg_h: 0,
-            reg_l: 0,
-            sp: 0xFFFF,         // Stack Pointer starting address   
+            reg_a: 0x01,
+            reg_b: 0x00,
+            reg_c: 0x13,
+            reg_d: 0x00,
+            reg_e: 0xD8,
+            reg_h: 0x01,
+            reg_l: 0x4D,
             pc: 0x0100,         // Gameboy starting address
-            zero: false,
+            sp: 0xFFFE,         // Stack Pointer starting address   
+            zero: true,
             sub: false,
             hc: false,
             carry: false,
@@ -75,90 +75,6 @@ impl CPU {
     const INTERRUPT_VECTORS: [u16; 5] = [0x40, 0x48, 0x50, 0x58, 0x60];
     const INTERRUPT_MASKS: [u8; 5] = [0x01, 0x02, 0x04, 0x08, 0x10];
 
-    /// Read 8 bit value from register
-    pub fn read_register(&self, reg: Register) -> u8 {
-        match reg {
-            Register::A => self.reg_a,
-            Register::B => self.reg_b,
-            Register::C => self.reg_c,
-            Register::D => self.reg_d,
-            Register::E => self.reg_e,
-            Register::H => self.reg_h,
-            Register::L => self.reg_l,
-            Register::F => self.get_flag_register(),
-            _ => panic!("Invalid register"),
-        }
-    }
-
-    /// Read the flag boolean value
-    pub fn read_flag(&self, flag: Register) -> bool {
-        match flag {
-            Register::ZERO => self.zero,
-            Register::SUB => self.sub,
-            Register::HC => self.hc,
-            Register::CARRY => self.carry,
-            _ => panic!("Invalid flag register"),
-        }
-    }
-    
-    /// Write 8 bit value to register
-    pub fn write_register(&mut self, reg: Register, value: u8) {
-        match reg {
-            Register::A => self.reg_a = value,
-            Register::B => self.reg_b = value,
-            Register::C => self.reg_c = value,
-            Register::D => self.reg_d = value,
-            Register::E => self.reg_e = value,
-            Register::H => self.reg_h = value,
-            Register::L => self.reg_l = value,
-            Register::F => {self.set_flag_register(value);},
-            Register::ZERO => self.zero = value != 0,
-            Register::SUB => self.sub = value != 0,
-            Register::HC => self.hc = value != 0,
-            Register::CARRY => self.carry = value != 0,
-            _ => panic!("Invalid register"),
-        }
-    }
-
-    /// Get the proper flag register
-    fn get_flag_register(&self) -> u8{
-        let mut value = 0;
-        if self.zero { value |= 0b1000_0000; }
-        if self.sub { value |= 0b0100_0000; }
-        if self.hc { value |= 0b0010_0000; }
-        if self.carry { value |= 0b0001_0000; }
-        return value;
-    }
-
-    /// Set the proper flag register
-    fn set_flag_register(&mut self, value: u8) {
-        self.zero = (value & 0b1000_0000) != 0;
-        self.sub = (value & 0b0100_0000) != 0;
-        self.hc = (value & 0b0010_0000) != 0;
-        self.carry = (value & 0b0001_0000) != 0;
-    }
-    
-    /// Write flag boolean value
-    pub fn write_flag(&mut self, flag: Register, value: bool) {
-        match flag {
-            Register::ZERO => self.zero = value,
-            Register::SUB => self.sub = value,
-            Register::HC => self.hc = value,
-            Register::CARRY => self.carry = value,
-            _ => panic!("Invalid flag register"),
-        }
-    }
-
-    /// Read 8 bit value from memory at address
-    fn read_memory(&self, address: u16) -> u8 {
-        return self.bus.borrow().read_byte(address);
-    }
-
-    /// Write 8 bit value to memory at address
-    fn write_memory(&mut self, address: u16, value: u8) {
-        self.bus.borrow_mut().write_byte(address, value);
-    }
-
     /// Public instruction to send ROM to MMU
     pub fn load_rom(&mut self, rom: &Vec<u8>) -> RomMetadata {
         return self.bus.borrow_mut().load_rom(rom);
@@ -167,7 +83,7 @@ impl CPU {
     /// Function to Run ROM by instruction
     pub fn step(&mut self) {
         if self.ime {
-            self.check_interrupts();
+            //self.check_interrupts();
         }
         let opcode = self.read_memory(self.pc);
         self.execute(opcode);
@@ -193,10 +109,97 @@ impl CPU {
         }
     }
 
+    /// Read 8 bit value from register
+    pub fn read_register(&self, reg: Register) -> u8 {
+        match reg {
+            Register::A => self.reg_a,
+            Register::B => self.reg_b,
+            Register::C => self.reg_c,
+            Register::D => self.reg_d,
+            Register::E => self.reg_e,
+            Register::H => self.reg_h,
+            Register::L => self.reg_l,
+            Register::F => self.get_flag_register(),
+            _ => panic!("Invalid register"),
+        }
+    }
+
+    /// Write 8 bit value to register
+    pub fn write_register(&mut self, reg: Register, value: u8) {
+        match reg {
+            Register::A => self.reg_a = value,
+            Register::B => self.reg_b = value,
+            Register::C => self.reg_c = value,
+            Register::D => self.reg_d = value,
+            Register::E => self.reg_e = value,
+            Register::H => self.reg_h = value,
+            Register::L => self.reg_l = value,
+            Register::F => {self.set_flag_register(value);},
+            Register::ZERO => self.zero = value != 0,
+            Register::SUB => self.sub = value != 0,
+            Register::HC => self.hc = value != 0,
+            Register::CARRY => self.carry = value != 0,
+            _ => panic!("Invalid register"),
+        }
+    }
+
+    /// Read the flag boolean value
+    pub fn read_flag(&self, flag: Register) -> bool {
+        match flag {
+            Register::ZERO => self.zero,
+            Register::SUB => self.sub,
+            Register::HC => self.hc,
+            Register::CARRY => self.carry,
+            _ => panic!("Invalid flag register"),
+        }
+    }
+
+    /// Write flag boolean value
+    pub fn write_flag(&mut self, flag: Register, value: bool) {
+        match flag {
+            Register::ZERO => self.zero = value,
+            Register::SUB => self.sub = value,
+            Register::HC => self.hc = value,
+            Register::CARRY => self.carry = value,
+            _ => panic!("Invalid flag register"),
+        }
+    }
+
+    /// Get the proper flag register
+    fn get_flag_register(&self) -> u8{
+        let mut value = 0;
+        if self.zero { value |= 0b1000_0000; }
+        if self.sub { value |= 0b0100_0000; }
+        if self.hc { value |= 0b0010_0000; }
+        if self.carry { value |= 0b0001_0000; }
+        return value;
+    }
+
+    /// Set the proper flag register
+    fn set_flag_register(&mut self, value: u8) {
+        self.zero = (value & 0b1000_0000) != 0;
+        self.sub = (value & 0b0100_0000) != 0;
+        self.hc = (value & 0b0010_0000) != 0;
+        self.carry = (value & 0b0001_0000) != 0;
+    }
+
+    /// Read 8 bit value from memory at address
+    fn read_memory(&self, address: u16) -> u8 {
+        return self.bus.borrow().read_byte(address);
+    }
+
+    /// Write 8 bit value to memory at address
+    fn write_memory(&mut self, address: u16, value: u8) {
+        self.bus.borrow_mut().write_byte(address, value);
+    }
+
     /// Print out the current state of the CPU
     pub fn log_state(&self, opcode: u8, pc: u16) {
         println!(
-            "Opcode: {:02X}, PC: {:04X}, A: {:02X}, B: {:02X}, C: {:02X}, D: {:02X}, E: {:02X}, H: {:02X}, L: {:02X}, (DE): {:02X} (HL): {:02X} SP: {:04X}, Z:{} N:{} H:{} C:{}",
+            "Opcode: {:02X}, PC: {:04X},\n
+            A: {:02X}, B: {:02X}, C: {:02X}, D: {:02X}, E: {:02X}, H: {:02X}, L: {:02X},\n
+            (AF): {:02X}, (BC): {:02X}, (DE): {:02X} (HL): {:02X} SP: {:04X},\n
+            Z:{} N:{} H:{} C:{} IE:{}",
             opcode,
             pc,
             self.read_register(Register::A),
@@ -206,6 +209,8 @@ impl CPU {
             self.read_register(Register::E),
             self.read_register(Register::H),
             self.read_register(Register::L),
+            self.read_memory(self.get_double_register(Register::A, Register::F)),
+            self.read_memory(self.get_double_register(Register::B, Register::C)),
             self.read_memory(self.get_double_register(Register::D, Register::E)),
             self.read_memory(self.get_double_register(Register::H, Register::L)),
             self.sp,
@@ -213,11 +218,13 @@ impl CPU {
             self.read_flag(Register::SUB),
             self.read_flag(Register::HC),
             self.read_flag(Register::CARRY),
+            self.read_memory(0xFFFF),
         );
     }
 
     /// Get OPCODE and execute the appropriate function
     pub fn execute(&mut self, opcode: u8) {
+        let pc = self.pc;
         match opcode {
             0xCB => {
                 let cb_opcode = self.read_memory(self.pc + 1);
@@ -533,7 +540,7 @@ impl CPU {
             }
         }
 
-        self.log_state(opcode, self.pc);
+        self.log_state(opcode, pc);
     }
 
     /// Handle Prefixed CB OPCODES
