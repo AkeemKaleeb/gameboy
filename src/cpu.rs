@@ -131,7 +131,7 @@ impl CPU {
             "PC: {:04X}, Opcode: {:02X}, op1: {:02X}, op2: {:02X}, op3: {:02X}\n
             AF: {:02X}{:02X}, BC: {:02X}{:02X}, DE: {:02X}{:02X}, HL: {:02X}{:02X},\n
             (AF): {:02X}, (BC): {:02X}, (DE): {:02X} (HL): {:02X} SP: {:04X},\n
-            Z:{} N:{} H:{} C:{} IE:{}",
+            Z:{} N:{} H:{} C:{} C000:{}",
             pc,
             opcode,
             self.read_memory(self.pc + 1),
@@ -154,7 +154,7 @@ impl CPU {
             self.read_flag(Register::SUB),
             self.read_flag(Register::HC),
             self.read_flag(Register::CARRY),
-            self.read_memory(0xFFFF),
+            self.read_memory(0xC000),
         );
     }
 
