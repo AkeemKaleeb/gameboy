@@ -7,13 +7,11 @@ extern crate sdl2;
 mod cpu;
 mod mmu;
 mod ppu;
-mod bus;
 
 use sdl2::pixels::Color;
 use sdl2::event::Event;
 use sdl2::keyboard::Keycode;
 use std::time::Duration;
-use bus::Bus;
 use cpu::CPU;
 use ppu::PPU;
 use mmu::MMU;
@@ -49,13 +47,12 @@ fn main() {
     */
 
     // Create Components
-    let mmu: MMU = MMU::new();
-    let bus: Rc<RefCell<Bus>> = Bus::new(mmu);
-    //let mut ppu: PPU = PPU::new(bus.clone(), scale_factor);
-    let mut cpu: CPU = CPU::new(bus);
+    let mmu: Rc<RefCell<MMU>> = MMU::new();
+    //let mut ppu: PPU = PPU::new(mmu.clone(), scale_factor);
+    let mut cpu: CPU = CPU::new(mmu);
 
     // Load ROM to Buffer, then load buffer to memory
-    let rom = read_rom("roms\\tests\\03.gb");
+    let rom = read_rom("roms\\tests\\07.gb");
     let _metadata = cpu.load_rom(&rom);
     //print_metadata(&metadata);
     
@@ -80,8 +77,8 @@ fn main() {
             }
         }*/
 
-        cpu.step();
-        //wait_for_enter();
+        //cpu.step();
+        wait_for_address(&mut cpu);
         //ppu.update(1, &mut canvas);
         //canvas.present();
 
@@ -102,6 +99,24 @@ fn wait_for_enter() {
     let mut input = String::new();
     io::stdout().flush().unwrap(); // Ensure the prompt is printed before waiting for input
     io::stdin().read_line(&mut input).unwrap();
+}
+
+#[cfg(debug_assertions)]
+fn wait_for_address(cpu: &mut CPU) {
+    let mut input = String::new();
+    io::stdout().flush().unwrap();
+    io::stdin().read_line(&mut input).unwrap();
+    let address = match u16::from_str_radix(input.trim().trim_start_matches("0x"), 16) {
+        Ok(addr) => addr,
+        Err(_) => {
+            cpu.step();
+            return;
+        }
+    };
+
+    while cpu.pc != address {
+        cpu.step();
+    }
 }
 
 fn print_metadata(metadata: &mmu::RomMetadata) {

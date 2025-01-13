@@ -1,5 +1,5 @@
 extern crate sdl2;
-use crate::bus::Bus;
+use crate::mmu::MMU;
 
 use sdl2::pixels::Color;
 use sdl2::rect::Rect;
@@ -23,12 +23,12 @@ pub struct PPU {
     mode: u8,               // Current Mode
     mode_clock: u32,        // Mode Clock
 
-    bus: Rc<RefCell<Bus>>,
+    mmu: Rc<RefCell<MMU>>,
     scale_factor: u32,
 }
 
 impl PPU {
-    pub fn new(bus: Rc<RefCell<Bus>>, scale_factor: u32) -> PPU {
+    pub fn new(mmu: Rc<RefCell<MMU>>, scale_factor: u32) -> PPU {
         PPU {
             lcdc: 0x91,
             stat: 0x85,
@@ -43,7 +43,7 @@ impl PPU {
             wx: 0x00,
             mode: 2,
             mode_clock: 0,
-            bus,
+            mmu,
             scale_factor,
         }
     }
@@ -115,7 +115,7 @@ impl PPU {
     /// Enter VBlank state
     fn enter_vblank(&mut self) {
         self.stat |= 0x01;                                                  // Set the VBlank flag in the STAT register
-        self.bus.borrow_mut().write_byte(0xFF0F, 0x01);     // Request VBlank interrupt
+        self.mmu.borrow_mut().write_byte(0xFF0F, 0x01);     // Request VBlank interrupt
     }
 
     /// Render background layer
@@ -127,12 +127,12 @@ impl PPU {
             for x in 0..160 {
                 let tile_x = (x + self.scx as u32) / 8;
                 let tile_y = (y + self.scy as u32) / 8;
-                let tile_index = self.bus.borrow().read_byte((tile_map_base + tile_y * 32 + tile_x) as u16);
+                let tile_index = self.mmu.borrow().read_byte((tile_map_base + tile_y * 32 + tile_x) as u16);
                 let tile_address = tile_data_base + (tile_index as u16 * 16);
                 let pixel_x = (x + self.scx as u32) % 8;
                 let pixel_y = (y + self.scy as u32) % 8;
-                let byte1 = self.bus.borrow().read_byte((tile_address + (pixel_y as u16) * 2) as u16);
-                let byte2 = self.bus.borrow().read_byte((tile_address + (pixel_y as u16) * 2 + 1) as u16);
+                let byte1 = self.mmu.borrow().read_byte((tile_address + (pixel_y as u16) * 2) as u16);
+                let byte2 = self.mmu.borrow().read_byte((tile_address + (pixel_y as u16) * 2 + 1) as u16);
                 let bit = 7 - pixel_x;
                 let color_id = ((byte1 >> bit) & 0x01) | (((byte2 >> bit) & 0x01) << 1);
                 let color = self.get_color(color_id, self.bgp); 
@@ -158,10 +158,10 @@ impl PPU {
 
         for i in 0..40 {
             let sprite_base = 0xFE00 + i * 4;
-            let y = self.bus.borrow().read_byte(sprite_base) as i32 - 16;
-            let x = self.bus.borrow().read_byte(sprite_base + 1) as i32 - 8;
-            let tile_index = self.bus.borrow().read_byte(sprite_base + 2);
-            let attributes = self.bus.borrow().read_byte(sprite_base + 3);
+            let y = self.mmu.borrow().read_byte(sprite_base) as i32 - 16;
+            let x = self.mmu.borrow().read_byte(sprite_base + 1) as i32 - 8;
+            let tile_index = self.mmu.borrow().read_byte(sprite_base + 2);
+            let attributes = self.mmu.borrow().read_byte(sprite_base + 3);
 
             let tile_address = 0x8000 + (tile_index as u16 * 16);
             let flip_x = attributes & 0x20 != 0;
@@ -172,8 +172,8 @@ impl PPU {
                 for px in 0..8 {
                     let pixel_x = if flip_x { 7 - px } else { px };
                     let pixel_y = if flip_y { 7 - py } else { py };
-                    let byte1 = self.bus.borrow().read_byte((tile_address + (pixel_y as u16) * 2) as u16);
-                    let byte2 = self.bus.borrow().read_byte((tile_address + (pixel_y as u16) * 2 + 1) as u16);
+                    let byte1 = self.mmu.borrow().read_byte((tile_address + (pixel_y as u16) * 2) as u16);
+                    let byte2 = self.mmu.borrow().read_byte((tile_address + (pixel_y as u16) * 2 + 1) as u16);
                     let bit = 7 - pixel_x;
                     let color_id = ((byte1 >> bit) & 0x01) | (((byte2 >> bit) & 0x01) << 1);
                     let color = self.get_color(color_id, palette);
@@ -209,12 +209,12 @@ impl PPU {
 
                 let tile_x = (x - self.wx as u32) / 8;
                 let tile_y = (y - self.wy as u32) / 8;
-                let tile_index = self.bus.borrow().read_byte((tile_map_base + tile_y * 32 + tile_x) as u16);
+                let tile_index = self.mmu.borrow().read_byte((tile_map_base + tile_y * 32 + tile_x) as u16);
                 let tile_address = tile_data_base + (tile_index as u16 * 16);
                 let pixel_x = (x - self.wx as u32) % 8;
                 let pixel_y = (y - self.wy as u32) % 8;
-                let byte1 = self.bus.borrow().read_byte((tile_address + (pixel_y as u16) * 2) as u16);
-                let byte2 = self.bus.borrow().read_byte((tile_address + (pixel_y as u16) * 2 + 1) as u16);
+                let byte1 = self.mmu.borrow().read_byte((tile_address + (pixel_y as u16) * 2) as u16);
+                let byte2 = self.mmu.borrow().read_byte((tile_address + (pixel_y as u16) * 2 + 1) as u16);
                 let bit = 7 - pixel_x;
                 let color_id = ((byte1 >> bit) & 0x01) | (((byte2 >> bit) & 0x01) << 1);
                 let color = self.get_color(color_id, self.bgp); 
@@ -234,25 +234,25 @@ impl PPU {
 
     /// Handle LCD Control based on the LCDC Register
     fn handle_lcdc(&mut self) {
-        self.lcdc = self.bus.borrow().read_byte(0xFF40);
+        self.lcdc = self.mmu.borrow().read_byte(0xFF40);
     }
 
     /// Handle LCD Status based on STAT register
     fn handle_stat(&mut self) {
-        self.stat = self.bus.borrow().read_byte(0xFF41);
+        self.stat = self.mmu.borrow().read_byte(0xFF41);
 
         // Request Interrupts if enabled
         if (self.stat & 0x20 != 0) && (self.ly == self.lyc) {
-            self.bus.borrow_mut().write_byte(0xFF0F, self.bus.borrow().read_byte(0xFF0F) | 0x02);
+            self.mmu.borrow_mut().write_byte(0xFF0F, self.mmu.borrow().read_byte(0xFF0F) | 0x02);
         }
         if (self.stat & 0x10 != 0) && (self.mode == 2) {
-            self.bus.borrow_mut().write_byte(0xFF0F, self.bus.borrow().read_byte(0xFF0F) | 0x02);
+            self.mmu.borrow_mut().write_byte(0xFF0F, self.mmu.borrow().read_byte(0xFF0F) | 0x02);
         }
         if (self.stat & 0x08 != 0) && (self.mode == 1) {
-            self.bus.borrow_mut().write_byte(0xFF0F, self.bus.borrow().read_byte(0xFF0F) | 0x02);
+            self.mmu.borrow_mut().write_byte(0xFF0F, self.mmu.borrow().read_byte(0xFF0F) | 0x02);
         }
         if (self.stat & 0x04 != 0) && (self.mode == 0) {
-            self.bus.borrow_mut().write_byte(0xFF0F, self.bus.borrow().read_byte(0xFF0F) | 0x02);
+            self.mmu.borrow_mut().write_byte(0xFF0F, self.mmu.borrow().read_byte(0xFF0F) | 0x02);
         }
     }
 

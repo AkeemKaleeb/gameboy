@@ -1,5 +1,4 @@
-use crate::bus::Bus;
-use crate::mmu::RomMetadata;
+use crate::mmu::{self, RomMetadata, MMU};
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -33,7 +32,7 @@ pub struct CPU {
     reg_l: u8,
 
     // 16 Bit Registers
-    pc: u16,
+    pub pc: u16,
     sp: u16,
 
     // Flags
@@ -42,8 +41,8 @@ pub struct CPU {
     hc: bool,
     carry: bool,
 
-    // Bus System
-    bus: Rc<RefCell<Bus>>,
+    // Memory Management System
+    mmu: Rc<RefCell<MMU>>,
 
     // Interrupt Master Enable
     ime: bool,
@@ -55,9 +54,9 @@ impl CPU {
     const INTERRUPT_VECTORS: [u16; 5] = [0x40, 0x48, 0x50, 0x58, 0x60];
     const INTERRUPT_MASKS: [u8; 5] = [0x01, 0x02, 0x04, 0x08, 0x10];
 
-    pub fn new(bus: Rc<RefCell<Bus>>) -> CPU {
+    pub fn new(mmu: Rc<RefCell<MMU>>) -> CPU {
         CPU {
-            reg_a: 0x01,
+            /*reg_a: 0x01,
             reg_b: 0x00,
             reg_c: 0x13,
             reg_d: 0x00,
@@ -71,13 +70,29 @@ impl CPU {
             hc: false,
             carry: false,
             ime: true,
-            bus,
+            mmu,*/
+            
+            reg_a: 0x11,
+            reg_b: 0x00,
+            reg_c: 0x00,
+            reg_d: 0xFF,
+            reg_e: 0x56,
+            reg_h: 0x00,
+            reg_l: 0x0D,
+            pc: 0x0100,
+            sp: 0xFFFE, 
+            zero: true,
+            sub: false,
+            hc: false,
+            carry: false,
+            ime: true,
+            mmu,
         }
     }
 
     /// Public instruction to send ROM to MMU
     pub fn load_rom(&mut self, rom: &Vec<u8>) -> RomMetadata {
-        return self.bus.borrow_mut().load_rom(rom);
+        return self.mmu.borrow_mut().load_rom(rom);
     }
 
     /// Function to Run ROM by instruction
@@ -87,18 +102,18 @@ impl CPU {
         }
         let opcode = self.read_memory(self.pc);
         self.execute(opcode);
-        self.bus.borrow_mut().tick(1);
+        self.mmu.borrow_mut().tick(1);
     }
 
     /// Test if an interrupt has been called
     fn check_interrupts(&mut self) {
-        let ie = self.bus.borrow().read_byte(Self::IE);
-        let mut if_ = self.bus.borrow().read_byte(Self::IF);
+        let ie = self.mmu.borrow().read_byte(Self::IE);
+        let mut if_ = self.mmu.borrow().read_byte(Self::IF);
 
         for (i, &mask) in Self::INTERRUPT_MASKS.iter().enumerate() {
             if (ie & mask) != 0 && (if_ & mask) != 0 {
                 if_ &= !mask;
-                self.bus.borrow_mut().write_byte(Self::IF, if_);
+                self.mmu.borrow_mut().write_byte(Self::IF, if_);
 
                 self.push_pc();
 
@@ -113,13 +128,17 @@ impl CPU {
     /// Print out the current state of the CPU
     pub fn log_state(&self, opcode: u8, pc: u16) {
         println!(
-            "Opcode: {:02X}, PC: {:04X},\n
-            A: {:02X}, B: {:02X}, C: {:02X}, D: {:02X}, E: {:02X}, H: {:02X}, L: {:02X},\n
+            "PC: {:04X}, Opcode: {:02X}, op1: {:02X}, op2: {:02X}, op3: {:02X}\n
+            AF: {:02X}{:02X}, BC: {:02X}{:02X}, DE: {:02X}{:02X}, HL: {:02X}{:02X},\n
             (AF): {:02X}, (BC): {:02X}, (DE): {:02X} (HL): {:02X} SP: {:04X},\n
             Z:{} N:{} H:{} C:{} IE:{}",
-            opcode,
             pc,
+            opcode,
+            self.read_memory(self.pc + 1),
+            self.read_memory(self.pc + 2),
+            self.read_memory(self.pc + 3),
             self.read_register(Register::A),
+            self.read_register(Register::F),
             self.read_register(Register::B),
             self.read_register(Register::C),
             self.read_register(Register::D),
@@ -141,7 +160,7 @@ impl CPU {
 
     /// Get OPCODE and execute the appropriate function
     pub fn execute(&mut self, opcode: u8) {
-        let pc = self.pc;
+        self.log_state(opcode, self.pc);
         match opcode {
             0xCB => {
                 let cb_opcode = self.read_memory(self.pc + 1);
@@ -153,8 +172,8 @@ impl CPU {
                     0x00 => self.nop(),
                     0x01 => self.ldi16(Register::B, Register::C),
                     0x02 => self.ldr_a(Register::B, Register::C, false, false),
-                    0x03 => self.inc(Register::B, Some(Register::C)),
-                    0x04 => self.inc(Register::B, None),
+                    0x03 => self.inc16(Register::B, Register::C),
+                    0x04 => self.inc(Register::B),
                     0x05 => self.dec(Register::B, None),
                     0x06 => self.ldi(Register::B),
                     0x07 => self.rlca(),
@@ -162,7 +181,7 @@ impl CPU {
                     0x09 => self.add16(Register::B, Register::C),
                     0x0A => self.lda(Register::B, Register::C),
                     0x0B => self.dec(Register::B, Some(Register::C)),
-                    0x0C => self.inc(Register::C, None),
+                    0x0C => self.inc(Register::C),
                     0x0D => self.dec(Register::C, None),
                     0x0E => self.ldi(Register::C),
                     0x0F => self.rrca(),
@@ -172,8 +191,8 @@ impl CPU {
                     0x00 => self.stop(),
                     0x01 => self.ldi16(Register::D, Register::E),
                     0x02 => self.ldr_a(Register::D, Register::E, false, false),
-                    0x03 => self.inc(Register::D, Some(Register::E)),
-                    0x04 => self.inc(Register::D, None),
+                    0x03 => self.inc16(Register::D, Register::E),
+                    0x04 => self.inc(Register::D),
                     0x05 => self.dec(Register::D, None),
                     0x06 => self.ldi(Register::D),
                     0x07 => self.rla(),
@@ -181,7 +200,7 @@ impl CPU {
                     0x09 => self.add16(Register::D, Register::E),
                     0x0A => self.lda(Register::D, Register::E),
                     0x0B => self.dec(Register::D, Some(Register::E)),
-                    0x0C => self.inc(Register::E, None),
+                    0x0C => self.inc(Register::E),
                     0x0D => self.dec(Register::E, None),
                     0x0E => self.ldi(Register::E),
                     0x0F => self.rra(),
@@ -191,8 +210,8 @@ impl CPU {
                     0x00 => self.jrnz(),
                     0x01 => self.ldi16(Register::H, Register::L),
                     0x02 => self.ldr_a(Register::H, Register::L, true, false),
-                    0x03 => self.inc(Register::H, Some(Register::L)),
-                    0x04 => self.inc(Register::H, None),
+                    0x03 => self.inc16(Register::H, Register::L),
+                    0x04 => self.inc(Register::H),
                     0x05 => self.dec(Register::H, None),
                     0x06 => self.ldi(Register::H),
                     0x07 => self.daa(),
@@ -200,7 +219,7 @@ impl CPU {
                     0x09 => self.add16(Register::H, Register::L),
                     0x0A => self.ldahl(true, false),
                     0x0B => self.dec(Register::H, Some(Register::L)),
-                    0x0C => self.inc(Register::L, None),
+                    0x0C => self.inc(Register::L),
                     0x0D => self.dec(Register::L, None),
                     0x0E => self.ldi(Register::L),
                     0x0F => self.cpl(),
@@ -210,16 +229,16 @@ impl CPU {
                     0x00 => self.jrnc(),
                     0x01 => self.ldspi(),
                     0x02 => self.ldr_a(Register::H, Register::L, false, true),
-                    0x03 => self.incsp(),
-                    0x04 => self.inc(Register::H, Some(Register::L)),
+                    0x03 => self.inc16(Register::SP, Register::SP),
+                    0x04 => self.inc16(Register::H, Register::L),
                     0x05 => self.dec(Register::H, Some(Register::L)),
                     0x06 => self.ldihl(),
                     0x07 => self.scf(),
                     0x08 => self.jrc(),
                     0x09 => self.add16(Register::SP, Register::SP),
                     0x0A => self.ldahl(false, true),
-                    0x0B => self.decsp(),
-                    0x0C => self.inc(Register::A, None),
+                    0x0B => self.dec16(Register::SP, Register::SP),
+                    0x0C => self.inc(Register::A),
                     0x0D => self.dec(Register::A, None),
                     0x0E => self.ldi(Register::A),
                     0x0F => self.ccf(),
@@ -456,8 +475,6 @@ impl CPU {
                 _ => println!("Opcode not implemented: {:02X}", opcode),
             }
         }
-
-        self.log_state(opcode, pc);
     }
 
     /// Handle Prefixed CB OPCODES
@@ -591,12 +608,12 @@ impl CPU {
 
     /// Read 8 bit value from memory at address
     fn read_memory(&self, address: u16) -> u8 {
-        return self.bus.borrow().read_byte(address);
+        return self.mmu.borrow().read_byte(address);
     }
 
     /// Write 8 bit value to memory at address
     fn write_memory(&mut self, address: u16, value: u8) {
-        self.bus.borrow_mut().write_byte(address, value);
+        self.mmu.borrow_mut().write_byte(address, value);
     }
 
     // OPCODE Helper Functions
@@ -935,9 +952,9 @@ impl CPU {
         self.pc += 1;
     }
 
-    /// Decrement SP
-    fn decsp(&mut self) {
-        self.sp = self.sp.wrapping_sub(1);
+    /// Decrement Double Register
+    fn dec16(&mut self, reg1: Register, reg2: Register) {
+        self.set_double_register(reg1, reg2, self.get_double_register(reg1, reg2).wrapping_sub(1));
         self.pc += 1;
     }
 
@@ -960,29 +977,21 @@ impl CPU {
     }
 
     /// Increment reg1, if reg2 is Some, increment reg2
-    fn inc(&mut self, reg1: Register, reg2: Option<Register>) {
-        match reg2 {
-            Some(r2) => {
-                let address = self.get_double_register(reg1, r2);
-                self.write_memory(address, self.read_memory(address).wrapping_add(1));
-            },
-            None => {
-                let value = self.read_register(reg1).wrapping_add(1);
-                self.write_register(reg1, value);
+    fn inc(&mut self, reg: Register) {
+        let value = self.read_register(reg).wrapping_add(1);
+        self.write_register(reg, value);
 
-                // Set Flags
-                self.write_flag(Register::ZERO, self.read_register(reg1) == 0);
-                self.write_flag(Register::SUB, false);
-                self.write_flag(Register::HC, (self.read_register(reg1) & 0x0F) + 1 > 0x0F);
-            }
-        }
+        // Set Flags
+        self.write_flag(Register::ZERO, value == 0);
+        self.write_flag(Register::SUB, false);
+        self.write_flag(Register::HC, (self.read_register(reg) & 0x0F) == 0);
 
         self.pc += 1;
     }
 
-    /// Increment SP
-    fn incsp(&mut self) {
-        self.sp = self.sp.wrapping_add(1);
+    /// Increment Double Register
+    fn inc16(&mut self, reg1: Register, reg2: Register) {
+        self.set_double_register(reg1, reg2, self.get_double_register(reg1, reg2).wrapping_add(1));
         self.pc += 1;
     }
 
@@ -1083,7 +1092,7 @@ impl CPU {
     fn jrnz(&mut self) {
         let offset = self.read_memory(self.pc + 1) as i8;
         if !self.read_flag(Register::ZERO) {
-            self.pc = self.pc.wrapping_add(2).wrapping_add(offset as i16 as u16);
+            self.pc = self.pc.wrapping_add(2).wrapping_add(offset as u16);
         } else {
             self.pc += 2;
         }
@@ -1109,16 +1118,17 @@ impl CPU {
         self.pc += 1;
     }
 
+    /// Load contents of (HL) to reg_a, increment/decrement HL
     fn ldahl(&mut self, increment: bool, decrement: bool) {
         let address = self.get_double_register(Register::H, Register::L);
         let value = self.read_memory(address);
         self.write_register(Register::A, value);
 
         if increment {
-            self.write_memory(address, value.wrapping_add(1));
+            self.inc16(Register::H, Register::L);
         }
         else if decrement {
-            self.write_memory(address, value.wrapping_sub(1));
+            self.dec16(Register::H, Register::L);
         }
 
         self.pc += 1;
@@ -1154,15 +1164,16 @@ impl CPU {
         self.pc += 3;
     }
 
+    /// Store contents of reg_a in memory location specified by two registers
     fn ldr_a(&mut self, reg1: Register, reg2: Register, increment: bool, decrement: bool) {
         let address = self.get_double_register(reg1, reg2);
         self.write_memory(address, self.read_register(Register::A));
         
         if increment {
-            self.inc(reg1, Some(reg2));
+            self.inc16(reg1, reg2);
         }
         else if decrement {
-            self.dec(reg1, Some(reg2));
+            self.dec16(reg1, reg2);
         }
 
         self.pc += 1;
@@ -1313,9 +1324,9 @@ impl CPU {
 
     /// Pop value from stack into register pair
     fn pop(&mut self, reg1: Register, reg2: Register) {
-        let low = self.bus.borrow().read_byte(self.sp);
+        let low = self.mmu.borrow().read_byte(self.sp);
         self.sp = self.sp.wrapping_add(1);
-        let high = self.bus.borrow().read_byte(self.sp);
+        let high = self.mmu.borrow().read_byte(self.sp);
         self.sp = self.sp.wrapping_add(1);
         self.write_register(reg1, low);
         self.write_register(reg2, high);
@@ -1325,9 +1336,9 @@ impl CPU {
 
     /// Pop value from stack into program counter
     fn pop_pc(&mut self) {
-        let low = self.bus.borrow().read_byte(self.sp);
+        let low = self.mmu.borrow().read_byte(self.sp);
         self.sp = self.sp.wrapping_add(1);
-        let high = self.bus.borrow().read_byte(self.sp);
+        let high = self.mmu.borrow().read_byte(self.sp);
         self.sp = self.sp.wrapping_add(1);
         self.pc = ((high as u16) << 8) | low as u16;
     }
@@ -1338,9 +1349,9 @@ impl CPU {
         let high = (value >> 8) as u8;
         let low = value as u8;
         self.sp = self.sp.wrapping_sub(1);
-        self.bus.borrow_mut().write_byte(self.sp, high);
+        self.mmu.borrow_mut().write_byte(self.sp, high);
         self.sp = self.sp.wrapping_sub(1);
-        self.bus.borrow_mut().write_byte(self.sp, low);
+        self.mmu.borrow_mut().write_byte(self.sp, low);
 
         self.pc += 1;
     }
@@ -1351,9 +1362,9 @@ impl CPU {
         let high = (pc >> 8) as u8;
         let low = pc as u8;
         self.sp = self.sp.wrapping_sub(1);
-        self.bus.borrow_mut().write_byte(self.sp, high);
+        self.mmu.borrow_mut().write_byte(self.sp, high);
         self.sp = self.sp.wrapping_sub(1);
-        self.bus.borrow_mut().write_byte(self.sp, low);
+        self.mmu.borrow_mut().write_byte(self.sp, low);
     }
 
     /// Return from subroutine

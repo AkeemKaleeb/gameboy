@@ -1,4 +1,6 @@
 use std::io::{self, Write};
+use std::cell::RefCell;
+use std::rc::Rc;
 
 pub struct MMU {
     rom: Vec<u8>,       // 0000-7FFF: 32KB ROM
@@ -37,8 +39,8 @@ impl MMU {
     const TAC: u16 = 0xFF07;
     const IF: u16 = 0xFF0F;
     
-    pub fn new() -> MMU {
-        MMU {
+    pub fn new() -> Rc<RefCell<MMU>> {
+        Rc::new(RefCell::new(MMU {
             rom: vec![0; 0x8000],       // Initialize 32KB of ROM
             vram: vec![0; 0x2000],      // Initialize 8KB of VRAM
             eram: vec![0; 0x2000],      // Initialize 8KB of External RAM
@@ -47,7 +49,7 @@ impl MMU {
             io_ports: vec![0; 0x80],    // Initialize I/O Ports
             hram: vec![0; 0x7F],        // Initialize High RAM
             ie_register: 0,             // Initialize Interrupt Enable Register
-        }
+        }))
     }
 
     /// Read a byte from memory
