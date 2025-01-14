@@ -96,7 +96,7 @@ impl CPU {
     }
 
     /// Function to Run ROM by instruction
-    pub fn step(&mut self) {
+    pub fn step(&mut self) {        
         if self.ime {
             //self.check_interrupts();
         }
@@ -131,7 +131,7 @@ impl CPU {
             "PC: {:04X}, Opcode: {:02X}, op1: {:02X}, op2: {:02X}, op3: {:02X}\n
             AF: {:02X}{:02X}, BC: {:02X}{:02X}, DE: {:02X}{:02X}, HL: {:02X}{:02X},\n
             (AF): {:02X}, (BC): {:02X}, (DE): {:02X} (HL): {:02X} SP: {:04X},\n
-            Z:{} N:{} H:{} C:{} C000:{}",
+            Z:{} N:{} H:{} C:{}",
             pc,
             opcode,
             self.read_memory(self.pc + 1),
@@ -154,7 +154,6 @@ impl CPU {
             self.read_flag(Register::SUB),
             self.read_flag(Register::HC),
             self.read_flag(Register::CARRY),
-            self.read_memory(0xC000),
         );
     }
 
@@ -171,7 +170,7 @@ impl CPU {
                 0x00 => match opcode & 0x0F {
                     0x00 => self.nop(),
                     0x01 => self.ldi16(Register::B, Register::C),
-                    0x02 => self.ldr_a(Register::B, Register::C, false, false),
+                    0x02 => self.ldr_a(Register::B, Register::C),
                     0x03 => self.inc16(Register::B, Register::C),
                     0x04 => self.inc(Register::B),
                     0x05 => self.dec(Register::B, None),
@@ -190,7 +189,7 @@ impl CPU {
                 0x10 => match opcode & 0x0F {
                     0x00 => self.stop(),
                     0x01 => self.ldi16(Register::D, Register::E),
-                    0x02 => self.ldr_a(Register::D, Register::E, false, false),
+                    0x02 => self.ldr_a(Register::D, Register::E),
                     0x03 => self.inc16(Register::D, Register::E),
                     0x04 => self.inc(Register::D),
                     0x05 => self.dec(Register::D, None),
@@ -209,7 +208,7 @@ impl CPU {
                 0x20 => match opcode & 0x0F {
                     0x00 => self.jrnz(),
                     0x01 => self.ldi16(Register::H, Register::L),
-                    0x02 => self.ldr_a(Register::H, Register::L, true, false),
+                    0x02 => self.ldhla(true, false),
                     0x03 => self.inc16(Register::H, Register::L),
                     0x04 => self.inc(Register::H),
                     0x05 => self.dec(Register::H, None),
@@ -228,7 +227,7 @@ impl CPU {
                 0x30 => match opcode & 0x0F {
                     0x00 => self.jrnc(),
                     0x01 => self.ldspi(),
-                    0x02 => self.ldr_a(Register::H, Register::L, false, true),
+                    0x02 => self.ldhla(false, true),
                     0x03 => self.inc16(Register::SP, Register::SP),
                     0x04 => self.inc16(Register::H, Register::L),
                     0x05 => self.dec(Register::H, Some(Register::L)),
@@ -1133,6 +1132,21 @@ impl CPU {
 
         self.pc += 1;
     }
+    
+    fn ldhla(&mut self, increment: bool, decrement: bool) {
+        let address = self.get_double_register(Register::H, Register::L);
+        let value = self.read_register(Register::A);
+        self.write_memory(address, value);
+
+        if increment {
+            self.inc16(Register::H, Register::L);
+        }
+        else if decrement {
+            self.dec16(Register::H, Register::L);
+        }
+
+        self.pc += 1;
+    }
 
     /// Store the contents of reg_a into 0xFF00 + a8
     fn lda8_a(&mut self) {
@@ -1165,16 +1179,9 @@ impl CPU {
     }
 
     /// Store contents of reg_a in memory location specified by two registers
-    fn ldr_a(&mut self, reg1: Register, reg2: Register, increment: bool, decrement: bool) {
+    fn ldr_a(&mut self, reg1: Register, reg2: Register) {
         let address = self.get_double_register(reg1, reg2);
         self.write_memory(address, self.read_register(Register::A));
-        
-        if increment {
-            self.inc16(reg1, reg2);
-        }
-        else if decrement {
-            self.dec16(reg1, reg2);
-        }
 
         self.pc += 1;
     }
