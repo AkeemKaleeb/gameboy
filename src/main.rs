@@ -52,7 +52,7 @@ fn main() {
     let mut cpu: CPU = CPU::new(mmu);
 
     // Load ROM to Buffer, then load buffer to memory
-    let rom = read_rom("roms\\tests\\07.gb");
+    let rom = read_rom("roms\\tests\\09.gb");
     let _metadata = cpu.load_rom(&rom);
     //print_metadata(&metadata);
     

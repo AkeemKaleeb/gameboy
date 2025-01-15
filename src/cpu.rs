@@ -1111,6 +1111,7 @@ impl CPU {
     /// Load address from two registers into reg_a, if HL, increment or decrement
     fn lda(&mut self, reg1: Register, reg2: Register) {
         let address = self.get_double_register(reg1, reg2);
+        println!("Address: {:04X}", address);
         let value = self.read_memory(address);
         self.write_register(Register::A, value);
 
@@ -1181,6 +1182,7 @@ impl CPU {
     /// Store contents of reg_a in memory location specified by two registers
     fn ldr_a(&mut self, reg1: Register, reg2: Register) {
         let address = self.get_double_register(reg1, reg2);
+        println!("Address: {:04X}", address);
         self.write_memory(address, self.read_register(Register::A));
 
         self.pc += 1;
