@@ -354,113 +354,6 @@ impl CPU {
         }
     }
 
-    /* 
-    /// Read 8 bit value from register
-    pub fn read_register(&self, reg: Register) -> u8 {
-        match reg {
-            Register::A => self.reg.get_register(Register::A),
-            Register::B => self.reg_b,
-            Register::C => self.reg_c,
-            Register::D => self.reg_d,
-            Register::E => self.reg_e,
-            Register::H => self.reg_h,
-            Register::L => self.reg_l,
-            Register::F => self.get_flag_register(),
-            _ => panic!("Invalid register"),
-        }
-    }
-
-     
-    /// Write 8 bit value to register
-    pub fn write_register(&mut self, reg: Register, value: u8) {
-        match reg {
-            Register::A => self.reg.get_register(Register::A) = value,
-            Register::B => self.reg_b = value,
-            Register::C => self.reg_c = value,
-            Register::D => self.reg_d = value,
-            Register::E => self.reg_e = value,
-            Register::H => self.reg_h = value,
-            Register::L => self.reg_l = value,
-            Register::F => {self.reg.set_flag_register(value);},
-            Flag::ZERO => self.zero = value != 0,
-            Register::SUB => self.sub = value != 0,
-            Flag::HC => self.hc = value != 0,
-            Flag::CARRY => self.carry = value != 0,
-            _ => panic!("Invalid register"),
-        }
-    }
-
-    /// Read the flag boolean value
-    pub fn read_flag(&self, flag: Register) -> bool {
-        match flag {
-            Flag::ZERO => self.zero,
-            Register::SUB => self.sub,
-            Flag::HC => self.hc,
-            Flag::CARRY => self.carry,
-            _ => panic!("Invalid flag register"),
-        }
-    }
-
-    /// Write flag boolean value
-    pub fn write_flag(&mut self, flag: Register, value: bool) {
-        match flag {
-            Flag::ZERO => self.zero = value,
-            Register::SUB => self.sub = value,
-            Flag::HC => self.hc = value,
-            Flag::CARRY => self.carry = value,
-            _ => panic!("Invalid flag register"),
-        }
-    }
-
-    /// Get the proper flag register
-    fn get_flag_register(&self) -> u8{
-        let mut value = 0;
-        if self.zero { value |= 0b1000_0000; }
-        if self.sub { value |= 0b0100_0000; }
-        if self.hc { value |= 0b0010_0000; }
-        if self.carry { value |= 0b0001_0000; }
-        return value;
-    }
-
-    /// Set the proper flag register
-    fn set_flag_register(&mut self, value: u8) {
-        self.zero = (value & 0b1000_0000) != 0;
-        self.sub = (value & 0b0100_0000) != 0;
-        self.hc = (value & 0b0010_0000) != 0;
-        self.carry = (value & 0b0001_0000) != 0;
-    }
-
-    /// Read 8 bit value from memory at address
-    fn read_memory(&self, address: u16) -> u8 {
-        return self.mmu.borrow().read_byte(address);
-    }
-
-    /// Write 8 bit value to memory at address
-    fn write_memory(&mut self, address: u16, value: u8) {
-        self.mmu.borrow_mut().write_byte(address, value);
-    }
-
-    // OPCODE Helper Functions
-    /// Function to get the address of an operand from an opcode
-    fn get_operand_address(&self) -> u16 {
-        let low_byte = self.get_next_byte();
-        let high_byte = self.read_memory(self.reg.pc + 2);
-        let address = ((high_byte as u16) << 8) | low_byte as u16;
-        return address;
-    }
-
-    /// Get 16-bit address from two registers
-    fn get_double_register(&self, reg1: Register, reg2: Register) -> u16 {
-        (self.reg.get_register(reg1) as u16) << 8 | self.reg.get_register(reg2) as u16
-    }
-
-    /// Set 16-bit value to two registers
-    fn set_double_register(&mut self, reg1: Register, reg2: Register, value: u16) {
-        self.reg.set_register(reg1, (value >> 8) as u8);
-        self.reg.set_register(reg2, value as u8);
-    }
-
-    */
 
 // OPCODE Functions
 // region: Load Operations
@@ -1297,70 +1190,360 @@ impl CPU {
 // endregion
 
 // region: Rotates and Shifts Operations
-    // rlca
+    // rlc s
     /// Rotate A left
-    fn rlca() {
+    fn rlc_a(&mut self) -> u8 {
+        let value = self.reg.get_register(Register::A);
+        let new_carry = (value & 0x80) >> 7;
+        let result = (value << 1) | new_carry;
 
+        // Set Flags
+        self.reg.set_flag(Flag::ZERO, false);
+        self.reg.set_flag(Flag::SUB, false);
+        self.reg.set_flag(Flag::HC, false);
+        self.reg.set_flag(Flag::CARRY, new_carry == 1);
+
+        // Store result and continue
+        self.reg.set_register(Register::A, result);
+        self.reg.pc = self.reg.pc.wrapping_add(1);
+
+        return 1;
+    }
+
+    /// Rotate register left
+    fn rlc_r(&mut self, reg: Register) -> u8 {
+        let value = self.reg.get_register(reg);
+        let new_carry = (value & 0x80) >> 7;
+        let result = (value << 1) | new_carry;
+
+        // Set Flags
+        self.reg.set_flag(Flag::ZERO, result == 0);
+        self.reg.set_flag(Flag::SUB, false);
+        self.reg.set_flag(Flag::HC, false);
+        self.reg.set_flag(Flag::CARRY, new_carry == 1);
+
+        self.reg.set_register(reg, result);
+        self.reg.pc = self.reg.pc.wrapping_add(2);
+        return 2;
+    }
+
+    /// Rotate address (HL) left
+    fn rlc_hl(&mut self) -> u8 {
+        let adr = self.reg.get_double_register(Register::H, Register::L);
+        let value = self.mmu.borrow().read_byte(adr);
+        let new_carry = (value & 0x80) >> 7;
+        let result = (value << 1) | new_carry;
+
+        // Set Flags
+        self.reg.set_flag(Flag::ZERO, result == 0);
+        self.reg.set_flag(Flag::SUB, false);
+        self.reg.set_flag(Flag::HC, false);
+        self.reg.set_flag(Flag::CARRY, new_carry == 1);
+
+        self.mmu.borrow_mut().write_byte(adr, result);
+        self.reg.pc = self.reg.pc.wrapping_add(2);
+        return 4;
     }
 
     // rla
     /// Rotate A left through carry
-    fn rla() {
+    fn rl_a(&mut self) -> u8 {
+        let value = self.reg.get_register(Register::A);
+        let new_carry = (value & 0x80) >> 7;
+        let result = (value << 1) | self.reg.get_flag(Flag::CARRY) as u8;
 
+        // Set Flags
+        self.reg.set_flag(Flag::ZERO, false);
+        self.reg.set_flag(Flag::SUB, false);
+        self.reg.set_flag(Flag::HC, false);
+        self.reg.set_flag(Flag::CARRY, new_carry == 1);
+
+        // Store result and continue
+        self.reg.set_register(Register::A, result);
+        self.reg.pc = self.reg.pc.wrapping_add(1);
+
+        return 1;
+    }
+
+    /// Rotate register left through carry
+    fn rl_r(&mut self, reg: Register) -> u8 {
+        let value = self.reg.get_register(reg);
+        let new_carry = (value & 0x80) >> 7;
+        let result = (value << 1) | self.reg.get_flag(Flag::CARRY) as u8;
+
+        // Set Flags
+        self.reg.set_flag(Flag::ZERO, result == 0);
+        self.reg.set_flag(Flag::SUB, false);
+        self.reg.set_flag(Flag::HC, false);
+        self.reg.set_flag(Flag::CARRY, new_carry == 1);
+
+        // Store result and continue
+        self.reg.set_register(Register::A, result);
+        self.reg.pc = self.reg.pc.wrapping_add(2);
+
+        return 2;
+    }
+
+    /// Rotate address (HL) left through carry
+    fn rl_hl(&mut self) -> u8 {
+        let adr = self.reg.get_double_register(Register::H, Register::L);
+        let value = self.mmu.borrow().read_byte(adr);
+        let new_carry = (value & 0x80) >> 7;
+        let result = (value << 1) | self.reg.get_flag(Flag::CARRY) as u8;
+
+        // Set Flags
+        self.reg.set_flag(Flag::ZERO, result == 0);
+        self.reg.set_flag(Flag::SUB, false);
+        self.reg.set_flag(Flag::HC, false);
+        self.reg.set_flag(Flag::CARRY, new_carry == 1);
+
+        // Store result and continue
+        self.mmu.borrow_mut().write_byte(adr, result);
+        self.reg.pc = self.reg.pc.wrapping_add(2);
+
+        return 4;
     }
 
     // rrca
     /// Rotate A right
-    fn rrca() {
+    fn rrc_a(&mut self) -> u8 {
+        let value = self.reg.get_register(Register::A);
+        let new_carry = value & 0x01;
+        let result = (value >> 1) | (new_carry << 7);
 
+        // Set Flags
+        self.reg.set_flag(Flag::ZERO, false);
+        self.reg.set_flag(Flag::SUB, false);
+        self.reg.set_flag(Flag::HC, false);
+        self.reg.set_flag(Flag::CARRY, new_carry == 1);
+
+        // Store result and continue
+        self.reg.set_register(Register::A, result);
+        self.reg.pc = self.reg.pc.wrapping_add(1);
+
+        return 1;
+    }
+
+    /// Rotate register right
+    fn rrc_r(&mut self, reg: Register) -> u8 {
+        let value = self.reg.get_register(reg);
+        let new_carry = value & 0x01;
+        let result = (value >> 1) | (new_carry << 7);
+
+        // Set Flags
+        self.reg.set_flag(Flag::ZERO, result == 0);
+        self.reg.set_flag(Flag::SUB, false);
+        self.reg.set_flag(Flag::HC, false);
+        self.reg.set_flag(Flag::CARRY, new_carry == 1);
+
+        // Store result and continue
+        self.reg.set_register(reg, result);
+        self.reg.pc = self.reg.pc.wrapping_add(2);
+
+        return 2;
+    }
+
+    /// Rotate address (HL) right
+    fn rrc_hl(&mut self) -> u8 {
+        let adr = self.reg.get_double_register(Register::H, Register::L);
+        let value = self.mmu.borrow().read_byte(adr);
+        let new_carry = value & 0x01;
+        let result = (value >> 1) | (new_carry << 7);
+
+        // Set Flags
+        self.reg.set_flag(Flag::ZERO, result == 0);
+        self.reg.set_flag(Flag::SUB, false);
+        self.reg.set_flag(Flag::HC, false);
+        self.reg.set_flag(Flag::CARRY, new_carry == 1);
+
+        // Store result and continue
+        self.mmu.borrow_mut().write_byte(adr, result);
+        self.reg.pc = self.reg.pc.wrapping_add(2);
+
+        return 4;
     }
 
     // rra
     /// Rotate A right through carry
-    fn rra() {
+    fn rr_a(&mut self) -> u8 {
+        let carry = self.reg.get_flag(Flag::CARRY);
+        let value = self.reg.get_register(Register::A);
+        let new_carry = value & 0x01;
+        let result = (value >> 1) | ((carry as u8) << 7);
 
-    }
+        // Set Flags
+        self.reg.set_flag(Flag::ZERO, false);
+        self.reg.set_flag(Flag::SUB, false);
+        self.reg.set_flag(Flag::HC, false);
+        self.reg.set_flag(Flag::CARRY, new_carry == 1);
 
-    // rlc s
-    /// Rotate source left
-    fn rlcr() {
+        // Store result and continue
+        self.reg.set_register(Register::A, result);
+        self.reg.pc = self.reg.pc.wrapping_add(1);
 
-    }
-
-    // rl s
-    /// Rotate source left through carry
-    fn rlr() {
-
-    }
-
-    // rrc s
-    /// Rotate source right
-    fn rrcr() {
-
+        return 1;
     }
 
     // rr s
-    /// Rotate source right through carry
-    fn rrr() {
+    /// Rotate register right through carry
+    fn rr_r(&mut self, reg: Register) -> u8 {
+        let carry = self.reg.get_flag(Flag::CARRY);
+        let value = self.reg.get_register(reg);
+        let new_carry = value & 0x01;
+        let result = (value >> 1) | ((carry as u8) << 7);
 
+        // Set Flags
+        self.reg.set_flag(Flag::ZERO, result == 0);
+        self.reg.set_flag(Flag::SUB, false);
+        self.reg.set_flag(Flag::HC, false);
+        self.reg.set_flag(Flag::CARRY, new_carry == 1);
+
+        // Store result and continue
+        self.reg.set_register(reg, result);
+        self.reg.pc = self.reg.pc.wrapping_add(2);
+
+        return 2;
+    }
+
+    /// Rotate address (HL) right through carry
+    fn rr_hl(&mut self) -> u8 {
+        let carry = self.reg.get_flag(Flag::CARRY);
+        let adr = self.reg.get_double_register(Register::H, Register::L);
+        let value = self.mmu.borrow().read_byte(adr);
+        let new_carry = value & 0x01;
+        let result = (value >> 1) | ((carry as u8) << 7);
+
+        // Set Flags
+        self.reg.set_flag(Flag::ZERO, result == 0);
+        self.reg.set_flag(Flag::SUB, false);
+        self.reg.set_flag(Flag::HC, false);
+        self.reg.set_flag(Flag::CARRY, new_carry == 1);
+
+        // Store result and continue
+        self.mmu.borrow_mut().write_byte(adr, result);
+        self.reg.pc = self.reg.pc.wrapping_add(2);
+
+        return 4;
     }
 
     // sla s
-    /// Shift source left
-    fn slar() {
+    /// Shift register left
+    fn sla_r(&mut self, reg: Register) -> u8 {
+        let value = self.reg.get_register(reg);
+        let new_carry = (value & 0x80) != 0; // Bit 7 to CY flag
+        let result = value << 1;
 
+        // Set Flags
+        self.reg.set_flag(Flag::ZERO, result == 0);
+        self.reg.set_flag(Flag::SUB, false);
+        self.reg.set_flag(Flag::HC, false);
+        self.reg.set_flag(Flag::CARRY, new_carry);
+
+        // Store result and continue
+        self.reg.set_register(reg, result);
+
+        self.reg.pc = self.reg.pc.wrapping_add(2);
+        return 2;
+    }
+
+    /// Shift address (HL) left
+    fn sla_hl(&mut self) -> u8 {
+        let adr = self.reg.get_double_register(Register::H, Register::L);
+        let value = self.mmu.borrow().read_byte(adr);
+        let new_carry = (value & 0x80) != 0; // Bit 7 to CY flag
+        let result = value << 1;
+
+        // Set Flags
+        self.reg.set_flag(Flag::ZERO, result == 0);
+        self.reg.set_flag(Flag::SUB, false);
+        self.reg.set_flag(Flag::HC, false);
+        self.reg.set_flag(Flag::CARRY, new_carry);
+
+        // Store result and continue
+        self.mmu.borrow_mut().write_byte(adr, result);
+
+        self.reg.pc = self.reg.pc.wrapping_add(2);
+        return 4;
     }
 
     // sra s
-    /// Shift source right
-    fn srar() {
+    /// Shift register right
+    fn sra_r(&mut self, reg: Register) -> u8 {
+        let value = self.reg.get_register(reg);
+        let new_carry = value & 0x01; // Bit 0 to CY flag
+        let result = (value & 0x80) | (value >> 1);
 
+        // Set Flags
+        self.reg.set_flag(Flag::ZERO, result == 0);
+        self.reg.set_flag(Flag::SUB, false);
+        self.reg.set_flag(Flag::HC, false);
+        self.reg.set_flag(Flag::CARRY, new_carry == 1);
+
+        // Store result and continue
+        self.reg.set_register(reg, result);
+
+        self.reg.pc = self.reg.pc.wrapping_add(2);
+        return 2;
+    }
+
+    /// Shift address (HL) right
+    fn sra_hl(&mut self) -> u8 {
+        let adr = self.reg.get_double_register(Register::H, Register::L);
+        let value = self.mmu.borrow().read_byte(adr);
+        let new_carry = value & 0x01; // Bit 0 to CY flag
+        let result = (value & 0x80) | (value >> 1);
+
+        // Set Flags
+        self.reg.set_flag(Flag::ZERO, result == 0);
+        self.reg.set_flag(Flag::SUB, false);
+        self.reg.set_flag(Flag::HC, false);
+        self.reg.set_flag(Flag::CARRY, new_carry == 1);
+
+        // Store result and continue
+        self.mmu.borrow_mut().write_byte(adr, result);
+
+        self.reg.pc = self.reg.pc.wrapping_add(2);
+        return 4;
     }
 
     // srl s
-    /// Shift source right
-    fn srlr() {
+    /// Shift regitser right
+    fn srl_r(&mut self, reg: Register) -> u8 {
+        let value = self.reg.get_register(reg);
+        let new_carry = value & 0x01; // Bit 0 to CY flag
+        let result = value >> 1;
 
+        // Set Flags
+        self.reg.set_flag(Flag::ZERO, result == 0);
+        self.reg.set_flag(Flag::SUB, false);
+        self.reg.set_flag(Flag::HC, false);
+        self.reg.set_flag(Flag::CARRY, new_carry == 1);
+
+        // Store result and continue
+        self.reg.set_register(reg, result);
+
+        self.reg.pc = self.reg.pc.wrapping_add(2);
+        return 2;
+    }
+
+    /// Shift address (HL) right
+    fn srl_hl(&mut self) -> u8 {
+        let adr = self.reg.get_double_register(Register::H, Register::L);
+        let value = self.mmu.borrow().read_byte(adr);
+        let new_carry = value & 0x01; // Bit 0 to CY flag
+        let result = value >> 1;
+
+        // Set Flags
+        self.reg.set_flag(Flag::ZERO, result == 0);
+        self.reg.set_flag(Flag::SUB, false);
+        self.reg.set_flag(Flag::HC, false);
+        self.reg.set_flag(Flag::CARRY, new_carry == 1);
+
+        // Store result and continue
+        self.mmu.borrow_mut().write_byte(adr, result);
+
+        self.reg.pc = self.reg.pc.wrapping_add(2);
+        return 4;
     }
 // endregion
 
@@ -1761,45 +1944,6 @@ impl CPU {
         }
     }
 
-    /// Add 8-bit signed operand to stack pointer, store result in HL
-    fn ldhlsp8(&mut self) {
-        let value = self.get_next_byte() as i8;
-        let result = self.reg.sp.wrapping_add(value as u16);
-        self.set_double_register(Register::H, Register::L, result);
-
-        // Set Flags
-        self.reg.set_flag(Flag::ZERO, false);
-        self.reg.set_flag(Flag::SUB, false);
-        self.reg.set_flag(Flag::HC, (self.reg.sp & 0x0F) + (value as u16 & 0x0F) > 0x0F);
-        self.reg.set_flag(Flag::CARRY, (self.reg.sp & 0xFF) + (value as u16 & 0xFF) > 0xFF);
-
-        self.reg.pc = self.reg.pc.wrapping_add(2);
-    }
-
-    /// Load stack pointer to memory
-    fn ldisp(&mut self) {
-        let address = self.get_operand_address();
-        self.write_memory(address, self.reg.sp as u8);
-        self.write_memory(address + 1, (self.reg.sp >> 8) as u8);
-        self.reg.pc = self.reg.pc.wrapping_add(3);
-    }
-
-    /// Load immediate pair from memory into the stack pointer
-    fn ldspi(&mut self) {
-        let low = self.get_next_byte();
-        let high = self.read_memory(self.reg.pc + 2);
-        let address = ((high as u16) << 8) | low as u16;
-        self.reg.sp = address;
-        self.reg.pc = self.reg.pc.wrapping_add(3);
-    }
-
-    /// Load contents of HL into SP
-    fn ldsphl(&mut self) {
-        let value = self.reg.get_double_register(Register::H, Register::L);
-        self.reg.sp = value;
-        self.reg.pc = self.reg.pc.wrapping_add(1);
-    }
-
     /// No opperation, continue
     fn nop(&mut self) -> u8 {
         self.reg.pc = self.reg.pc.wrapping_add(1);
@@ -1887,75 +2031,6 @@ impl CPU {
         else {
             self.reg.pc = self.reg.pc.wrapping_add(1);
         }
-    }
-
-    /// Rotate reg_a Left through carry
-    fn rla(&mut self) {
-        let value = self.reg.get_register(Register::A);
-        let new_carry = (value & 0x80) >> 7;
-        let result = (value << 1) | self.reg.get_flag(Flag::CARRY) as u8;
-
-        // Set Flags
-        self.reg.set_flag(Flag::ZERO, false);
-        self.reg.set_flag(Flag::SUB, false);
-        self.reg.set_flag(Flag::HC, false);
-        self.reg.set_flag(Flag::CARRY, new_carry == 1);
-
-        // Store result and continue
-        self.reg.set_register(Register::A, result);
-        self.reg.pc = self.reg.pc.wrapping_add(1);
-    }
-    
-    /// Rotate reg_a Left 
-    fn rlca(&mut self) {
-        let value = self.reg.get_register(Register::A);
-        let new_carry = (value & 0x80) >> 7;
-        let result = (value << 1) | new_carry;
-
-        // Set Flags
-        self.reg.set_flag(Flag::ZERO, false);
-        self.reg.set_flag(Flag::SUB, false);
-        self.reg.set_flag(Flag::HC, false);
-        self.reg.set_flag(Flag::CARRY, new_carry == 1);
-
-        // Store result and continue
-        self.reg.set_register(Register::A, result);
-        self.reg.pc = self.reg.pc.wrapping_add(1);
-    }
-
-    /// Rotate reg_a Right through carry
-    fn rra(&mut self) {
-        let carry = self.reg.get_flag(Flag::CARRY);
-        let value = self.reg.get_register(Register::A);
-        let new_carry = value & 0x01;
-        let result = (value >> 1) | ((carry as u8) << 7);
-
-        // Set Flags
-        self.reg.set_flag(Flag::ZERO, false);
-        self.reg.set_flag(Flag::SUB, false);
-        self.reg.set_flag(Flag::HC, false);
-        self.reg.set_flag(Flag::CARRY, new_carry == 1);
-
-        // Store result and continue
-        self.reg.set_register(Register::A, result);
-        self.reg.pc = self.reg.pc.wrapping_add(1);
-    }
-
-    /// Rotate reg_a Right
-    fn rrca(&mut self) {
-        let value = self.reg.get_register(Register::A);
-        let new_carry = value & 0x01;
-        let result = (value >> 1) | (new_carry << 7);
-
-        // Set Flags
-        self.reg.set_flag(Flag::ZERO, false);
-        self.reg.set_flag(Flag::SUB, false);
-        self.reg.set_flag(Flag::HC, false);
-        self.reg.set_flag(Flag::CARRY, new_carry == 1);
-
-        // Store result and continue
-        self.reg.set_register(Register::A, result);
-        self.reg.pc = self.reg.pc.wrapping_add(1);
     }
 
     /// Push current counter to stack, jump to address based on the given parameter (0-7)
