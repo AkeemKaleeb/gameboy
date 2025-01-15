@@ -1676,20 +1676,40 @@ impl CPU {
 // region: Call Operations
     // call nn
     /// Call immediate 16-bit value
-    fn call() {
+    fn call(&mut self) -> u8 {
+        let address = self.mmu.borrow().read_word(self.reg.pc.wrapping_add(1));
+        self.reg.pc = self.reg.pc.wrapping_add(3);
+        self.push(Register::PC, self.reg.pc);
+        self.reg.pc = address;
 
+        return 6;
     }
 
     // call cc, nn
     /// Conditional Call to immediate 16-bit value
-    fn callcc() {
+    fn callcc(&mut self, flag: Flag, condition: bool) -> u8 {
+        if self.reg.get_flag(flag) == condition {
+            let address = self.mmu.borrow().read_word(self.reg.pc.wrapping_add(1));
+            self.reg.pc = self.reg.pc.wrapping_add(3);
+            self.push(Register::PC, Register::PC);
+            self.reg.pc = address;
+
+            return 6;
+        }
+        else {
+            self.reg.pc = self.reg.pc.wrapping_add(3);
+            return 3;
+        }
 
     }
 
     // RST f
-    /// Call to restart
-    fn rst() {
+    /// Push present address onto stack and jump to address n
+    fn rst(&mut self, n: u8) -> u8 {
+        self.push(Register::PC, Register::PC);
+        self.reg.pc = (n as u16) * 0x08;
 
+        return 4;
     }
 // endregion
 
@@ -1775,66 +1795,6 @@ impl CPU {
     }
 // endregion
 
-    /// Call subroutinie at address
-    fn call(&mut self) {
-        let address = self.get_operand_address();
-        self.reg.pc = self.reg.pc.wrapping_add(3);
-        self.push_pc();
-        self.reg.pc = address;
-    }
-
-    /// Call subroutine if carry is set
-    fn callc(&mut self) {
-        let address = self.get_operand_address();
-        if self.reg.get_flag(Flag::CARRY) {
-            self.reg.pc = self.reg.pc.wrapping_add(3);
-            self.push_pc();
-            self.reg.pc = address;
-        }
-        else {
-            self.reg.pc = self.reg.pc.wrapping_add(3);
-        }
-    }
-
-    /// Call subroutine if carry is not set
-    fn callnc(&mut self) {
-        let address = self.get_operand_address();
-        if !(self.reg.get_flag(Flag::CARRY)) {
-            self.reg.pc = self.reg.pc.wrapping_add(3);
-            self.push_pc();
-            self.reg.pc = address;
-        }
-        else {
-            self.reg.pc = self.reg.pc.wrapping_add(3);
-        }
-    }
-
-    /// Call subroutine if zero is set
-    fn callz(&mut self) {
-        let address = self.get_operand_address();
-        if self.reg.get_flag(Flag::ZERO) {
-            self.reg.pc = self.reg.pc.wrapping_add(3);
-            self.push_pc();
-            self.reg.pc = address;
-        }
-        else {
-            self.reg.pc = self.reg.pc.wrapping_add(3);
-        }
-    }
-
-    /// Call subroutine if zero is not set
-    fn callnz(&mut self) {
-        let address = self.get_operand_address();
-        if !(self.reg.get_flag(Flag::ZERO)) {
-            self.reg.pc = self.reg.pc.wrapping_add(3);
-            self.push_pc();
-            self.reg.pc = address;
-        }
-        else {
-            self.reg.pc = self.reg.pc.wrapping_add(3);
-        }
-    }
-
     /// Flip carry flag
     fn ccf(&mut self) {
         self.reg.set_flag(Flag::SUB, false);
@@ -1886,12 +1846,6 @@ impl CPU {
         }
     }
 
-    /// Decrement Double Register
-    fn dec16(&mut self, reg1: Register, reg2: Register) {
-        self.set_double_register(reg1, reg2, self.reg.get_double_register(reg1, reg2).wrapping_sub(1));
-        self.reg.pc = self.reg.pc.wrapping_add(1);
-    }
-
     /// Disable Interrupts
     fn di(&mut self) {
         self.ime = false;
@@ -1910,148 +1864,10 @@ impl CPU {
         panic!("Implement Halt");
     }
 
-    /// Jump if carry is set
-    fn jpc(&mut self) {
-        let address = self.get_operand_address();
-
-        if self.reg.get_flag(Flag::CARRY) {
-            self.reg.pc = address;
-        }
-        else {
-            self.reg.pc = self.reg.pc.wrapping_add(3);
-        }
-    }
-
-    /// Jump to address at HL
-    fn jphl(&mut self) {
-        let address = self.reg.get_double_register(Register::H, Register::L);
-        self.reg.pc = address;
-    }
-
-    /// Jump if carry is not set
-    fn jpnc(&mut self) {
-        let address = self.get_operand_address();
-
-        if !(self.reg.get_flag(Flag::CARRY)) {
-            self.reg.pc = address;
-        }
-        else {
-            self.reg.pc = self.reg.pc.wrapping_add(3);
-        }
-    }
-
-    /// Jump is zero is not set
-    fn jpnz(&mut self) {
-        // Read the 16 bit immediate operand
-        let address = self.get_operand_address();
-
-        // Check Zero Flag
-        if !(self.reg.get_flag(Flag::ZERO)) {
-            self.reg.pc = address;
-        }
-        else {
-            // Increment to next instruction, skip operand
-            self.reg.pc = self.reg.pc.wrapping_add(3);
-        }
-    }
-
-    /// Jump if zero is set
-    fn jpz(&mut self) {
-        let address = self.get_operand_address();
-
-        if !(self.reg.get_flag(Flag::ZERO)) {
-            self.reg.pc = address;
-        }
-        else {
-            self.reg.pc = self.reg.pc.wrapping_add(3);
-        }
-    }
-
-    /// Jump relative number of steps in next 16 bits
-    fn jr(&mut self) {
-        let offset = self.get_next_byte() as i8;
-        self.reg.pc = self.reg.pc.wrapping_add(2).wrapping_add(offset as u16);
-    }
-
-    /// Jump relative if carry is set
-    fn jrc(&mut self) {
-        let offset = self.get_next_byte() as i8;
-        if self.reg.get_flag(Flag::CARRY) {
-            self.reg.pc = self.reg.pc.wrapping_add(2).wrapping_add(offset as u16);
-        }
-        else {
-            self.reg.pc = self.reg.pc.wrapping_add(2);
-        }
-    }
-
-    /// Jump relative if carry is not set
-    fn jrnc(&mut self) {
-        let offset = self.get_next_byte() as i8;
-        if !self.reg.get_flag(Flag::CARRY) {
-            self.reg.pc = self.reg.pc.wrapping_add(2).wrapping_add(offset as u16);
-        }
-        else {
-            self.reg.pc = self.reg.pc.wrapping_add(2);
-        }
-    }
-
-    /// Jump relative is zero is not set
-    fn jrnz(&mut self) {
-        let offset = self.get_next_byte() as i8;
-        if !self.reg.get_flag(Flag::ZERO) {
-            self.reg.pc = self.reg.pc.wrapping_add(2).wrapping_add(offset as u16);
-        } else {
-            self.reg.pc = self.reg.pc.wrapping_add(2);
-        }
-    }
-
-    /// Jump relative if zero is set
-    fn jrz(&mut self) {
-        let offset = self.get_next_byte() as i8;
-        if self.reg.get_flag(Flag::ZERO) {
-            self.reg.pc = self.reg.pc.wrapping_add(2).wrapping_add(offset as u16);
-        }
-        else {
-            self.reg.pc = self.reg.pc.wrapping_add(2);
-        }
-    }
-
     /// No opperation, continue
     fn nop(&mut self) -> u8 {
         self.reg.pc = self.reg.pc.wrapping_add(1);
         return 1;
-    }
-
-    /// Pop value from stack into register pair
-    fn pop(&mut self, reg1: Register, reg2: Register) {
-        let low = self.mmu.borrow().read_byte(self.reg.sp);
-        self.reg.sp = self.reg.sp.wrapping_add(1);
-        let high = self.mmu.borrow().read_byte(self.reg.sp);
-        self.reg.sp = self.reg.sp.wrapping_add(1);
-        self.reg.set_register(reg1, low);
-        self.reg.set_register(reg2, high);
-
-        self.reg.pc = self.reg.pc.wrapping_add(1);
-    }
-
-    /// Pop value from stack into program counter
-    fn pop_pc(&mut self) {
-        let low = self.mmu.borrow().read_byte(self.reg.sp);
-        self.reg.sp = self.reg.sp.wrapping_add(1);
-        let high = self.mmu.borrow().read_byte(self.reg.sp);
-        self.reg.sp = self.reg.sp.wrapping_add(1);
-        self.reg.pc = ((high as u16) << 8) | low as u16;
-    }
-
-    /// Push program counter onto stack
-    fn push_pc(&mut self) {
-        let pc = self.reg.pc;
-        let high = (pc >> 8) as u8;
-        let low = pc as u8;
-        self.reg.sp = self.reg.sp.wrapping_sub(1);
-        self.mmu.borrow_mut().write_byte(self.reg.sp, high);
-        self.reg.sp = self.reg.sp.wrapping_sub(1);
-        self.mmu.borrow_mut().write_byte(self.reg.sp, low);
     }
 
     /// Return from subroutine
@@ -2103,12 +1919,6 @@ impl CPU {
         else {
             self.reg.pc = self.reg.pc.wrapping_add(1);
         }
-    }
-
-    /// Push current counter to stack, jump to address based on the given parameter (0-7)
-    fn rst(&mut self, n: u8) {
-        self.push_pc();
-        self.reg.pc = (n as u16) * 0x08;
     }
 
     /// Set Carry Flag
