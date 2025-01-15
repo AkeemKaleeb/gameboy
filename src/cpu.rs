@@ -74,20 +74,18 @@ impl CPU {
     /// Retrieve the next Byte from memory
     fn get_next_byte(&mut self) -> u8 {
         let byte = self.mmu.borrow().read_byte(self.reg.pc);
-        self.reg.pc = self.reg.pc.wrapping_add(1);
         return byte;
     }
 
     /// Retrieve the next 16-bit value from memory
-    fn read_next_word(&mut self) -> u16 {
-        let word = self.mmu.borrow().read_word(self.reg.pc);
-        self.reg.pc = self.reg.pc.wrapping_add(2);
+    fn get_next_word(&mut self) -> u16 {
+        let word = self.mmu.borrow().read_word(self.reg.pc.wrapping_add(1));
         return word;
     }
 
     /// Get OPCODE and execute the appropriate function
     pub fn execute(&mut self) -> u8 {
-        let opcode = self.get_next_byte();
+        let opcode = self.mmu.borrow().read_byte(self.reg.pc);
         match opcode {
             0x00 => self.nop(),
             0x01 => self.ldi16(Register::B, Register::C),
@@ -465,131 +463,271 @@ impl CPU {
     */
 
 // OPCODE Functions
-// Load Operations
+// region: Load Operations
     // 8-Bit Loads
-    // ld r, s
-    /// Load register with value of source
-    fn ldr() {
-
+    // ld r, s; ld d, r
+    /// Load register with value of register
+    fn ld_r_r(&mut self, reg1: Register, reg2: Register) -> u8{
+        self.reg.set_register(reg1, self.reg.get_register(reg2));
+        self.reg.pc = self.reg.pc.wrapping_add(1);
+        return 1;
     }
 
-    // ld d, r
-    /// Load register into destination
-    fn ldd() {
+    /// Load register with value of immediate
+    fn ld_r_i(&mut self, reg: Register) -> u8 {
+        // Get immediate 8 bits
+        let value = self.mmu.borrow().read_byte(self.reg.pc);
 
+        // Load to proper register
+        self.reg.set_register(reg, value);
+        self.reg.pc = self.reg.pc.wrapping_add(2);
+        return 2;
     }
 
-    // ld d, n
-    /// Load 8-bit immediate value into register
-    fn ldi() {
+    /// Load register with value of address (HL)
+    fn ld_r_hl(&mut self, reg: Register) -> u8 {
+        let adr = self.reg.get_double_register(Register::H, Register::L);
+        let value = self.mmu.borrow().read_byte(adr);
+        
+        self.reg.set_register(reg, value);
+        self.reg.pc = self.reg.pc.wrapping_add(1);
+        return 2;
+    }
 
+    /// Load address (HL) with value of register
+    fn ld_hl_r(&mut self, reg: Register) -> u8 {
+        let adr = self.reg.get_double_register(Register::H, Register::L);
+        let value = self.reg.get_register(reg);
+        
+        self.mmu.borrow_mut().write_byte(adr, value);
+        self.reg.pc = self.reg.pc.wrapping_add(1);
+        return 2;
+    }
+
+    /// Load 8-bit immediate value into address (HL)
+    fn ld_hl_i(&mut self) -> u8 {
+        let value = self.mmu.borrow().read_byte(self.reg.pc);
+        let address = self.reg.get_double_register(Register::H, Register::L);
+
+        self.mmu.borrow_mut().write_byte(address, value);
+        self.reg.pc = self.reg.pc.wrapping_add(2);
+        return 3;
     }
 
     // ld A, (ss)
     /// Load A with value at address in two registers
-    fn ld_a_adr() {
+    fn ld_ra_aa(&mut self, reg1: Register, reg2: Register) -> u8 {
+        let adr = self.reg.get_double_register(reg1, reg2);
+        let value = self.mmu.borrow().read_byte(adr);
 
+        self.reg.set_register(Register::A, value);
+        self.reg.pc = self.reg.pc.wrapping_add(1);
+        return 2;
+    }
+
+    /// Load A with value at address in immediate value
+    fn ld_ra_ii(&mut self) -> u8 {
+        let adr = self.mmu.borrow().read_word(self.reg.pc.wrapping_add(1));
+        let value = self.mmu.borrow().read_byte(adr);
+
+        self.reg.set_register(Register::A, value);
+        self.reg.pc = self.reg.pc.wrapping_add(3);
+        return 4;
     }
 
     // ld (dd), A
     /// Store contents of A in memory location specified by two registers
-    fn ld_adr_a(&mut self, reg1: Register, reg2: Register) -> u8 {
+    fn ld_aa_ra(&mut self, reg1: Register, reg2: Register) -> u8 {
         self.mmu.borrow_mut().write_byte(self.reg.get_double_register(reg1, reg2), self.reg.get_register(Register::A));
+        
         self.reg.pc.wrapping_add(1);
-
         return 2;
+    }
+
+    /// Store contents of A in memory location specified by immediate value
+    fn ld_ii_ra(&mut self) -> u8 {
+        let adr = self.mmu.borrow().read_word(self.reg.pc.wrapping_add(1));
+        self.mmu.borrow_mut().write_byte(adr, self.reg.get_register(Register::A));
+        
+        self.reg.pc.wrapping_add(3);
+        return 4;
     }
 
     // ld A, (C)
     /// Load A with value at address in C + 0xFF00
-    fn ld_a_ram() {
+    fn ld_ra_ram(&mut self) -> u8 {
+        let adr = 0xFF00 + self.reg.get_register(Register::C) as u16;
+        let value = self.mmu.borrow().read_byte(adr);
 
+        self.reg.set_register(Register::A, value);
+        self.reg.pc = self.reg.pc.wrapping_add(1);
+        return 2;
     }
 
     // ld (C), A
     /// Store contents of A in memory location specified by register C + 0xFF00
-    fn ld_ram_a() {
+    fn ld_ram_ra(&mut self) -> u8 {
+        let adr = 0xFF00 + self.reg.get_register(Register::C) as u16;
+        let value = self.reg.get_register(Register::A);
 
+        self.mmu.borrow_mut().write_byte(adr, value);
+        self.reg.pc = self.reg.pc.wrapping_add(1);
+        return 2;
     }
 
     // ldd A, (HL)
     /// Load A with value at address in HL, decrement HL
-    fn lddec_a_hl() {
+    fn lddec_a_hl(&mut self) -> u8 {
+        let adr = self.reg.get_double_register(Register::H, Register::L);
+        let value = self.mmu.borrow().read_byte(adr);
 
+        self.reg.set_register(Register::A, value);
+        self.reg.set_double_register(Register::H, Register::L, adr.wrapping_sub(1));
+        self.reg.pc = self.reg.pc.wrapping_add(1);
+        return 2;
     }
 
     // ldd (HL), A
     /// Store contents of A in memory location specified by HL, decrement HL
-    fn lddec_hl_a() {
+    fn lddec_hl_a(&mut self) -> u8 {
+        let adr = self.reg.get_double_register(Register::H, Register::L);
+        let value = self.reg.get_register(Register::A);
 
+        self.mmu.borrow_mut().write_byte(adr, value);
+        self.reg.set_double_register(Register::H, Register::L, adr.wrapping_sub(1));
+        self.reg.pc = self.reg.pc.wrapping_add(1);
+        return 2;
     }
 
     // ldi A, (HL)
     /// Load A with value at address in HL, increment HL
-    fn ldinc_a_hl() {
+    fn ldinc_a_hl(&mut self) -> u8 {
+        let adr = self.reg.get_double_register(Register::H, Register::L);
+        let value = self.mmu.borrow().read_byte(adr);
 
+        self.reg.set_register(Register::A, value);
+        self.reg.set_double_register(Register::H, Register::L, adr.wrapping_add(1));
+        self.reg.pc = self.reg.pc.wrapping_add(1);
+        return 2;
     }
 
     // ldi (HL), A
     /// Store contents of A in memory location specified by HL, increment HL
-    fn ldinc_hl_a() {
+    fn ldinc_hl_a(&mut self) -> u8 {
+        let adr = self.reg.get_double_register(Register::H, Register::L);
+        let value = self.reg.get_register(Register::A);
 
+        self.mmu.borrow_mut().write_byte(adr, value);
+        self.reg.set_double_register(Register::H, Register::L, adr.wrapping_add(1));
+        self.reg.pc = self.reg.pc.wrapping_add(1);
+        return 2;
     }
 
     // ldh (n), A
     /// Store contents of A in memory location specified by immediate value + 0xFF00
-    fn ldr_imm_a() {
-
+    fn ldi_ram_a(&mut self) -> u8 {
+        let address = 0xFF00 + self.mmu.borrow().read_byte(self.reg.pc) as u16;
+        let value = self.reg.get_register(Register::A);
+        self.mmu.borrow_mut().write_byte(address, value);
+        
+        self.reg.pc = self.reg.pc.wrapping_add(2);
+        return 3;
     }
 
     // ldh A, (n)
     /// Load A with value at address specified by immediate value + 0xFF00
-    fn ld_a_imm() {
-
+    fn ldi_a_ram(&mut self) -> u8 {
+        let address = 0xFF00 + self.mmu.borrow().read_byte(self.reg.pc) as u16;
+        let value = self.mmu.borrow_mut().read_byte(address);
+        self.reg.set_register(Register::A, value);
+        
+        self.reg.pc = self.reg.pc.wrapping_add(2);
+        return 3
     }
 
     // 16-Bit Loads
     // ld dd, nn
     /// Load 16-bit immediate value into double register
-    fn ldi16() {
-
+    fn ldi_rr(&mut self, reg1: Register, reg2: Register) -> u8 {
+        let value = self.mmu.borrow().read_word(self.reg.pc);
+        self.reg.set_double_register(reg1, reg2, value);
+        
+        self.reg.pc = self.reg.pc.wrapping_add(3);
+        return 3;
     }
 
     // ld (nn), SP
     /// Store contents of SP in memory location specified by immediate value
-    fn ld_adr_sp() {
-
+    fn ldi_ram_sp(&mut self) -> u8 {
+        let address = self.mmu.borrow().read_word(self.reg.pc);
+        let value = self.reg.get_double_register(Register::SP, Register::SP);
+        self.mmu.borrow_mut().write_word(address, value);
+        
+        self.reg.pc = self.reg.pc.wrapping_add(3);
+        return 5;
     }
 
     // ld SP, HL
     /// Load SP with HL
-    fn ld_sp_hl() {
-
+    fn ld_sp_hl(&mut self) -> u8 {
+        let value = self.reg.get_double_register(Register::H, Register::L);
+        self.reg.set_double_register(Register::SP, Register::SP, value);
+        
+        self.reg.pc = self.reg.pc.wrapping_add(1);
+        return 2;
     }
 
     // ld HL, (SP+e)
     /// Load HL with value at address specified by SP + immediate signed value
-    fn ld_hl_sp() {
+    fn ld_hl_sp(&mut self) -> u8 {
+        let e = self.mmu.borrow().read_byte(self.reg.pc) as i8;
+        let sp = self.reg.get_double_register(Register::SP, Register::SP);
+        let result = sp.wrapping_add(e as u16);
 
+        // Set Flags
+        self.reg.set_flag(Flag::ZERO, false);
+        self.reg.set_flag(Flag::SUB, false);
+        self.reg.set_flag(Flag::HC, ((sp & 0x0F) + (e & 0x0F) as u16) > 0x0F);
+        self.reg.set_flag(Flag::CARRY, ((sp & 0xFF) + (e & 0xFF) as u16) > 0xFF);
+
+        self.reg.set_double_register(Register::H, Register::L, result);
+        self.reg.pc = self.reg.pc.wrapping_add(2);
+        return 3;
     }
 
     // push ss
     /// Push double register onto stack
-    fn push() {
+    fn push(&mut self, reg1: Register, reg2: Register) -> u8 {
+        self.reg.sp = self.reg.sp.wrapping_sub(1);
+        self.mmu.borrow_mut().write_byte(self.reg.sp, self.reg.get_register(reg1));
+        self.reg.sp = self.reg.sp.wrapping_sub(1);
+        self.mmu.borrow_mut().write_byte(self.reg.sp, self.reg.get_register(reg2));
 
+        self.reg.pc = self.reg.pc.wrapping_add(1);
+        return 4;
     }
 
     // pop dd
     /// Pop double register from stack
-    fn pop() {
+    fn pop(&mut self, reg1: Register, reg2: Register) -> u8 {
+        let value1 = self.mmu.borrow().read_byte(self.reg.sp);
+        self.reg.sp = self.reg.sp.wrapping_add(1);
+        let value2 = self.mmu.borrow().read_byte(self.reg.sp);
+        self.reg.sp = self.reg.sp.wrapping_add(1);
 
+        self.reg.set_register(reg1, value1);
+        self.reg.set_register(reg2, value2);
+
+        self.reg.pc = self.reg.pc.wrapping_add(1);
+        return 3;
     }
+// endregion
 
- // ALU Operations
+// region: ALU Operations
     // 8-Bit Operations
     // add A, s
     /// Add reg to register A
-    fn addr(&mut self, reg: Register) -> u8 {
+    fn add_r(&mut self, reg: Register) -> u8 {
         let value = self.reg.get_register(reg);
         let a = self.reg.get_register(Register::A);
         let (result, carry) = a.overflowing_add(value);
@@ -607,8 +745,8 @@ impl CPU {
     }
 
     /// Add immediate to register A
-    fn addi(&mut self) -> u8 {
-        let value = self.get_next_byte();
+    fn add_i(&mut self) -> u8 {
+        let value = self.mmu.borrow().read_byte(self.reg.pc);
         let a = self.reg.get_register(Register::A);
         let (result, carry) = a.overflowing_add(value);
         
@@ -625,7 +763,7 @@ impl CPU {
     }
 
     /// Add address (HL) to register A
-    fn adda(&mut self) -> u8 {
+    fn add_hl(&mut self) -> u8 {
         let adr = self.reg.get_double_register(Register::H, Register::L);
         let value = self.mmu.borrow().read_byte(adr);
         let a = self.reg.get_register(Register::A);
@@ -645,7 +783,7 @@ impl CPU {
 
     // adc A, s
     /// Add reg with carry to reg A
-    fn adcr(&mut self, reg: Register) -> u8{
+    fn adc_r(&mut self, reg: Register) -> u8{
         let value = self.reg.get_register(reg);
         let carry = self.reg.get_flag(Flag::CARRY);
         let (result, carry1) = self.reg.get_register(Register::A).overflowing_add(value);
@@ -664,8 +802,8 @@ impl CPU {
     }
 
     /// Add immediate with carry to reg A
-    fn adci(&mut self) -> u8 {
-        let value = self.get_next_byte();
+    fn adc_i(&mut self) -> u8 {
+        let value = self.mmu.borrow().read_byte(self.reg.pc);
         let carry = self.reg.get_flag(Flag::CARRY);
         let (result, carry1) = self.reg.get_register(Register::A).overflowing_add(value);
         let (result, carry2) = result.overflowing_add(carry as u8);
@@ -683,7 +821,7 @@ impl CPU {
     }
 
     /// Add address (HL) with carry to reg A
-    fn adca(&mut self) -> u8{
+    fn adc_hl(&mut self) -> u8{
         let adr = self.reg.get_double_register(Register::H, Register::L);
         let value = self.mmu.borrow().read_byte(adr);
         let carry = self.reg.get_flag(Flag::CARRY);
@@ -704,7 +842,7 @@ impl CPU {
 
     // sub s
     /// Subtract reg from register A
-    fn subr(&mut self, reg: Register) -> u8 {
+    fn sub_r(&mut self, reg: Register) -> u8 {
         // Compute Result
         let value = self.reg.get_register(reg);
         let (result, borrow) = self.reg.get_register(Register::A).overflowing_sub(value);
@@ -722,8 +860,8 @@ impl CPU {
     }
 
     /// Subtract immediate from register A
-    fn subi(&mut self) -> u8 {
-        let value = self.get_next_byte();
+    fn sub_i(&mut self) -> u8 {
+        let value = self.mmu.borrow().read_byte(self.reg.pc);
         let (result, borrow) = self.reg.get_register(Register::A).overflowing_sub(value);
 
         // Set flags
@@ -739,7 +877,7 @@ impl CPU {
     }
 
     /// Subtract address (HL) from register A
-    fn suba(&mut self) -> u8 {
+    fn sub_hl(&mut self) -> u8 {
         // Compute Result
         let adr = self.reg.get_double_register(Register::H, Register::L);
         let value = self.mmu.borrow().read_byte(adr);
@@ -759,7 +897,7 @@ impl CPU {
 
     // sbc A, s
     /// Subtract reg with carry from reg A
-    fn sbcr(&mut self, reg: Register) -> u8 {
+    fn sbc_r(&mut self, reg: Register) -> u8 {
         // Compute Result
         let value = self.reg.get_register(reg);        
         let carry = self.reg.get_flag(Flag::CARRY);
@@ -780,9 +918,9 @@ impl CPU {
     }
 
     /// Subtract immediate with carry from reg A
-    fn sbci(&mut self) -> u8 {
+    fn sbc_i(&mut self) -> u8 {
         // Compute Result
-        let value = self.get_next_byte();        
+        let value = self.mmu.borrow().read_byte(self.reg.pc);        
         let carry = self.reg.get_flag(Flag::CARRY);
 
         let (result, borrow1) = self.reg.get_register(Register::A).overflowing_sub(value);
@@ -801,7 +939,7 @@ impl CPU {
     }
 
     /// Subtract address (HL) with carry from reg A
-    fn sbca(&mut self) -> u8 {
+    fn sbc_hl(&mut self) -> u8 {
         // Compute Result
         let adr = self.reg.get_double_register(Register::H, Register::L);
         let value = self.mmu.borrow().read_byte(adr);        
@@ -824,7 +962,7 @@ impl CPU {
 
     // and s
     /// Logical AND reg with register A
-    fn andr(&mut self, reg: Register) -> u8 {
+    fn and_r(&mut self, reg: Register) -> u8 {
         // Calulate result
         let value = self.reg.get_register(reg);
         let result = self.reg.get_register(Register::A) & value;
@@ -842,9 +980,9 @@ impl CPU {
     }
 
     /// Logical AND immediate with register A
-    fn andi(&mut self) -> u8 {
+    fn and_i(&mut self) -> u8 {
         // Calulate result
-        let value = self.get_next_byte();
+        let value = self.mmu.borrow().read_byte(self.reg.pc);
         let result = self.reg.get_register(Register::A) & value;
 
         // Set Flags
@@ -860,7 +998,7 @@ impl CPU {
     }
 
     /// Logical AND address (HL) with register A
-    fn anda(&mut self) -> u8 {
+    fn and_hl(&mut self) -> u8 {
         // Calulate result
         let adr = self.reg.get_double_register(Register::H, Register::L);
         let value = self.mmu.borrow().read_byte(adr);
@@ -880,7 +1018,7 @@ impl CPU {
 
     // or s
     /// Logical OR reg with register A
-    fn orr(&mut self, reg: Register) -> u8 {
+    fn or_r(&mut self, reg: Register) -> u8 {
         // Calulate result
         let value = self.reg.get_register(reg);
         let result = self.reg.get_register(Register::A) | value;
@@ -898,9 +1036,9 @@ impl CPU {
     }
 
     /// Logical OR immediate with register A
-    fn ori(&mut self) -> u8 {
+    fn or_i(&mut self) -> u8 {
         // Calulate result
-        let value = self.get_next_byte();
+        let value = self.mmu.borrow().read_byte(self.reg.pc);
         let result = self.reg.get_register(Register::A) | value;
 
         // Set Flags
@@ -916,7 +1054,7 @@ impl CPU {
     }
 
     /// Logical OR address (HL) with register A
-    fn ora(&mut self) -> u8 {
+    fn or_hl(&mut self) -> u8 {
         // Calulate result
         let adr = self.reg.get_double_register(Register::H, Register::L);
         let value = self.mmu.borrow().read_byte(adr);
@@ -936,7 +1074,7 @@ impl CPU {
 
     // xor s
     /// Logical XOR reg with register A
-    fn xorr(&mut self, reg: Register) -> u8 {
+    fn xor_r(&mut self, reg: Register) -> u8 {
         // Calulate result
         let value = self.reg.get_register(reg);
         let result = self.reg.get_register(Register::A) ^ value;
@@ -954,9 +1092,9 @@ impl CPU {
     }
 
     /// Logical XOR immediate with register A
-    fn xori(&mut self) -> u8 {
+    fn xor_i(&mut self) -> u8 {
         // Calulate result
-        let value = self.get_next_byte();
+        let value = self.mmu.borrow().read_byte(self.reg.pc);
         let result = self.reg.get_register(Register::A) ^ value;
 
         // Set Flags
@@ -972,7 +1110,7 @@ impl CPU {
     }
 
     /// Logical XOR address (HL) with register A
-    fn xora(&mut self) -> u8 {
+    fn xor_hl(&mut self) -> u8 {
         // Calulate result
         let adr = self.reg.get_double_register(Register::H, Register::L);
         let value = self.mmu.borrow().read_byte(adr);
@@ -992,7 +1130,7 @@ impl CPU {
 
     // cp s
     /// Compare reg with register A
-    fn cpr(&mut self, reg: Register) -> u8 {
+    fn cp_r(&mut self, reg: Register) -> u8 {
         // Calulate result
         let value = self.reg.get_register(reg);
         let (result, borrow) = self.reg.get_register(Register::A).overflowing_sub(value);
@@ -1009,9 +1147,9 @@ impl CPU {
     }
 
     /// Compare immediate with register A
-    fn cpi(&mut self) -> u8 {
+    fn cp_i(&mut self) -> u8 {
         // Calulate result
-        let value = self.get_next_byte();
+        let value = self.mmu.borrow().read_byte(self.reg.pc);
         let (result, borrow) = self.reg.get_register(Register::A).overflowing_sub(value);
 
         // Set Flags
@@ -1026,7 +1164,7 @@ impl CPU {
     }
 
     /// Compare address (HL) with register A
-    fn cpa(&mut self) -> u8 {
+    fn cp_hl(&mut self) -> u8 {
         // Calulate result
         let adr = self.reg.get_double_register(Register::H, Register::L);
         let value = self.mmu.borrow().read_byte(adr);
@@ -1059,7 +1197,7 @@ impl CPU {
     }
 
     /// Increment address (HL)
-    fn inca(&mut self) -> u8 {
+    fn inc_hl(&mut self) -> u8 {
         let adr = self.reg.get_double_register(Register::H, Register::L);
         let value = self.mmu.borrow().read_byte(adr).wrapping_add(1);
         self.mmu.borrow_mut().write_byte(adr, value);
@@ -1090,7 +1228,7 @@ impl CPU {
     }
 
     /// Decrement address (HL)
-    fn deca(&mut self) -> u8 {
+    fn dec_hl(&mut self) -> u8 {
         let adr = self.reg.get_double_register(Register::H, Register::L);
         let value = self.mmu.borrow().read_byte(adr).wrapping_sub(1);
         self.mmu.borrow_mut().write_byte(adr, value);
@@ -1108,7 +1246,7 @@ impl CPU {
     // 16-Bit Operations
     // add HL, ss
     /// Add double register to HL
-    fn addrr_16(&mut self, reg1: Register, reg2: Register) -> u8 {
+    fn add_hl_rr(&mut self, reg1: Register, reg2: Register) -> u8 {
         let value = self.reg.get_double_register(reg1, reg2);
         let result = self.reg.get_double_register(Register::H, Register::L).wrapping_add(value);
         self.reg.set_double_register(Register::H, Register::L, result);
@@ -1124,8 +1262,8 @@ impl CPU {
 
     // add SP, e
     /// Add immediate signed value to SP
-    fn addspi(&mut self) -> u8 {
-        let value = self.get_next_byte() as i8;
+    fn add_sp_i(&mut self) -> u8 {
+        let value = self.mmu.borrow().read_byte(self.reg.pc) as i8;
         let result = self.reg.sp.wrapping_add(value as u16);
         self.reg.sp = result;
 
@@ -1141,7 +1279,7 @@ impl CPU {
 
     // inc ss
     /// Increment Double Register
-    fn incrr16(&mut self, reg1: Register, reg2: Register) -> u8 {
+    fn inc_rr(&mut self, reg1: Register, reg2: Register) -> u8 {
         self.reg.set_double_register(reg1, reg2, self.reg.get_double_register(reg1, reg2).wrapping_add(1));
         self.reg.pc = self.reg.pc.wrapping_add(1);
 
@@ -1150,14 +1288,15 @@ impl CPU {
 
     // dec ss
     /// Decrement Double Register
-    fn decrr16(&mut self, reg1: Register, reg2: Register) -> u8 {
+    fn dec_rr(&mut self, reg1: Register, reg2: Register) -> u8 {
         self.reg.set_double_register(reg1, reg2, self.reg.get_double_register(reg1, reg2).wrapping_sub(1));
         self.reg.pc = self.reg.pc.wrapping_add(1);
 
         return 2;
     }
-    
-// Rotates and Shifts Operations
+// endregion
+
+// region: Rotates and Shifts Operations
     // rlca
     /// Rotate A left
     fn rlca() {
@@ -1223,8 +1362,9 @@ impl CPU {
     fn srlr() {
 
     }
+// endregion
 
-// Bit Operations
+// region: Bit Operations
     // bit b, s
     /// Copy Complements of Given Bit to Zero Flag
     fn bit() {
@@ -1242,8 +1382,9 @@ impl CPU {
     fn res_flag() {
 
     }
-    
-// Jump Operations
+// endregion
+
+// region: Jump Operations
     // jp nn
     /// Jump to immediate 16-bit value
     fn jp() {
@@ -1273,8 +1414,9 @@ impl CPU {
     fn jrcc() {
 
     }
-    
-// Call Operations
+// endregion
+
+// region: Call Operations
     // call nn
     /// Call immediate 16-bit value
     fn call() {
@@ -1286,8 +1428,9 @@ impl CPU {
     fn callcc() {
 
     }
-    
-// Return Operations
+// endregion
+
+// region: Return Operations
     // ret
     /// Return from subroutine
     fn ret() {
@@ -1305,8 +1448,9 @@ impl CPU {
     fn reti() {
 
     }
-    
-// Miscellaneuous
+// endregion
+
+// region: Miscellaneuous
     // swap s
     /// Swap Nibles
     fn swap() {
@@ -1366,6 +1510,7 @@ impl CPU {
     fn ei() {
 
     }
+// endregion
 
     /// Call subroutinie at address
     fn call(&mut self) {
@@ -1616,142 +1761,6 @@ impl CPU {
         }
     }
 
-    /// Load address from two registers into reg_a, if HL, increment or decrement
-    fn lda(&mut self, reg1: Register, reg2: Register) {
-        let address = self.reg.get_double_register(reg1, reg2);
-        println!("Address: {:04X}", address);
-        let value = self.read_memory(address);
-        self.reg.set_register(Register::A, value);
-
-        self.reg.pc = self.reg.pc.wrapping_add(1);
-    }
-
-    /// Load contents of (HL) to reg_a, increment/decrement HL
-    fn ldahl(&mut self, increment: bool, decrement: bool) {
-        let address = self.reg.get_double_register(Register::H, Register::L);
-        let value = self.read_memory(address);
-        self.reg.set_register(Register::A, value);
-
-        if increment {
-            self.inc16(Register::H, Register::L);
-        }
-        else if decrement {
-            self.dec16(Register::H, Register::L);
-        }
-
-        self.reg.pc = self.reg.pc.wrapping_add(1);
-    }
-    
-    fn ldhla(&mut self, increment: bool, decrement: bool) {
-        let address = self.reg.get_double_register(Register::H, Register::L);
-        let value = self.reg.get_register(Register::A);
-        self.write_memory(address, value);
-
-        if increment {
-            self.inc16(Register::H, Register::L);
-        }
-        else if decrement {
-            self.dec16(Register::H, Register::L);
-        }
-
-        self.reg.pc = self.reg.pc.wrapping_add(1);
-    }
-
-    /// Store the contents of reg_a into 0xFF00 + a8
-    fn lda8_a(&mut self) {
-        let address = 0xFF00 + self.get_next_byte() as u16;
-        self.write_memory(address, self.reg.get_register(Register::A));
-        self.reg.pc = self.reg.pc.wrapping_add(2);
-    }
-
-    /// Load the contents of 0xFF00 + a8 into reg_a
-    fn lda_a8(&mut self) {
-        let address = 0xFF00 + self.get_next_byte() as u16;
-        let value = self.read_memory(address);
-        self.reg.set_register(Register::A, value);
-        self.reg.pc = self.reg.pc.wrapping_add(2);
-    }
-
-    /// Load contents of reg_a into given address
-    fn lda16_a(&mut self) {
-        let address = self.get_operand_address();
-        self.write_memory(address, self.reg.get_register(Register::A));
-        self.reg.pc = self.reg.pc.wrapping_add(3);
-    }
-
-    /// Load contents of given address into reg_a
-    fn lda_a16(&mut self) {
-        let address = self.get_operand_address();
-        let value = self.read_memory(address);
-        self.reg.set_register(Register::A, value);
-        self.reg.pc = self.reg.pc.wrapping_add(3);
-    }
-
-    /// Load reg2 into reg1
-    fn ld(&mut self, reg1: Register, reg2: Register) {
-        let value;
-        if reg2 == Register::HL {
-            let address = self.reg.get_double_register(Register::H, Register::L);
-            value = self.read_memory(address);
-        }
-        else {
-            value = self.reg.get_register(reg2);
-        }
-
-        if reg1 == Register::HL {
-            let address = self.reg.get_double_register(Register::H, Register::L);
-            self.write_memory(address, value);
-        }
-        else {
-            self.reg.set_register(reg1, value);
-        }
-        self.reg.pc = self.reg.pc.wrapping_add(1);
-    }
-
-    /// Store contents of memory specified by c into reg_a
-    fn ldac(&mut self) {
-        let address = 0xFF00 + self.reg.get_register(Register::C) as u16;
-        let value = self.read_memory(address);
-        self.reg.set_register(Register::A, value);
-        self.reg.pc = self.reg.pc.wrapping_add(1);
-    }
-
-    /// Store contents of reg_a into memory address specified by reg_c
-    fn ldca(&mut self) {
-        let address = 0xFF00 + self.reg.get_register(Register::C) as u16;
-        self.write_memory(address, self.reg.get_register(Register::A));
-        self.reg.pc = self.reg.pc.wrapping_add(1);
-    }
-
-    /// Load immediate 8 bit value into reg
-    fn ldi(&mut self, reg: Register) {
-        // Get immediate 8 bits
-        let value = self.get_next_byte();
-
-        // Load to proper register
-        self.reg.set_register(reg, value);
-        self.reg.pc = self.reg.pc.wrapping_add(2);
-    }
-
-    /// Load immediate 16 bit value into regs
-    fn ldi16(&mut self, reg1: Register, reg2: Register) -> u8 {
-        // Get immediate 16 bits
-        let word = self.read_next_word();
-
-        // Load to proper registers
-        self.reg.set_double_register(reg1, reg2, word);
-        self.reg.set_register_16(Register::PC, self.reg.get_register_16(Register::PC).wrapping_add(2));
-        return 3;
-    }
-
-    /// Load immediate 8 bit value into memory address specified by HL
-    fn ldihl(&mut self) {
-        let value = self.get_next_byte();
-        let address = self.reg.get_double_register(Register::H, Register::L);
-        self.write_memory(address, value);
-        self.reg.pc = self.reg.pc.wrapping_add(2);
-    }
-
     /// Add 8-bit signed operand to stack pointer, store result in HL
     fn ldhlsp8(&mut self) {
         let value = self.get_next_byte() as i8;
@@ -1816,19 +1825,6 @@ impl CPU {
         let high = self.mmu.borrow().read_byte(self.reg.sp);
         self.reg.sp = self.reg.sp.wrapping_add(1);
         self.reg.pc = ((high as u16) << 8) | low as u16;
-    }
-
-    /// Push contents of register pair onto stack
-    fn push(&mut self, reg1: Register, reg2: Register) {
-        let value = self.reg.get_double_register(reg1, reg2);
-        let high = (value >> 8) as u8;
-        let low = value as u8;
-        self.reg.sp = self.reg.sp.wrapping_sub(1);
-        self.mmu.borrow_mut().write_byte(self.reg.sp, high);
-        self.reg.sp = self.reg.sp.wrapping_sub(1);
-        self.mmu.borrow_mut().write_byte(self.reg.sp, low);
-
-        self.reg.pc = self.reg.pc.wrapping_add(1);
     }
 
     /// Push program counter onto stack

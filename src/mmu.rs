@@ -53,7 +53,7 @@ impl MMU {
     }
 
     pub fn do_step(&mut self, ticks: u8) -> u8 {
-        self.tick(1);
+        self.tick(ticks as u32);
         1
     }
 
