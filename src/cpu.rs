@@ -1,5 +1,6 @@
 use crate::mmu::{self, RomMetadata, MMU};
 use crate::registers::{Flag, Reg, Register};
+use core::panic;
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -1698,7 +1699,7 @@ impl CPU {
     fn call(&mut self) -> u8 {
         let address = self.mmu.borrow().read_word(self.reg.pc.wrapping_add(1));
         self.reg.pc = self.reg.pc.wrapping_add(3);
-        self.push(Register::PC, self.reg.pc);
+        self.push_pc();
         self.reg.pc = address;
 
         return 6;
@@ -1765,90 +1766,52 @@ impl CPU {
 
 // region: Miscellaneuous
     // swap s
-    /// Swap Nibles
-    fn swap() {
+    /// Swap Nibles in register
+    fn swap_r(&mut self, reg: Register) -> u8 {
+        let value = self.reg.get_register(reg);
+        let result = (value << 4) | (value >> 4);
 
+        // Set Flags
+        self.reg.set_flag(Flag::ZERO, result == 0);
+        self.reg.set_flag(Flag::SUB, false);
+        self.reg.set_flag(Flag::HC, false);
+        self.reg.set_flag(Flag::CARRY, false);
+
+        // Store result and continue
+        self.reg.set_register(reg, result);
+        self.reg.pc = self.reg.pc.wrapping_add(1);
+
+        return 2;
+    }
+
+    /// Swap Nibles in address (HL)
+    fn swap_hl(&mut self) -> u8 {
+        let adr = self.reg.get_double_register(Register::H, Register::L);
+        let value = self.mmu.borrow().read_byte(adr);
+        let result = (value << 4) | (value >> 4);
+
+        // Set Flags
+        self.reg.set_flag(Flag::ZERO, result == 0);
+        self.reg.set_flag(Flag::SUB, false);
+        self.reg.set_flag(Flag::HC, false);
+        self.reg.set_flag(Flag::CARRY, false);
+
+        // Store result and continue
+        self.mmu.borrow_mut().write_byte(adr, result);
+        self.reg.pc = self.reg.pc.wrapping_add(1);
+
+        return 4;
     }
 
     // daa
     /// Decimal Adjust A
-    fn daa() {
-
-    }
-
-    // cpl
-    /// Complement A
-    fn cpl() {
-
-    }
-
-    // ccf
-    /// Complement Carry Flag
-    fn ccf() {
-
-    }
-
-    // scf
-    /// Set Carry Flag
-    fn scf() {
-
-    }
-
-    // nop
-    /// No Operation
-    fn nop() {
-
-    }
-
-    // halt
-    /// Halt CPU
-    fn halt() {
-
-    }
-
-    // stop
-    /// Stop CPU
-    fn stop() {
-
-    }
-
-    // di
-    /// Disable Interrupts
-    fn di() {
-
-    }
-
-    // ei
-    /// Enable Interrupts
-    fn ei() {
-
-    }
-// endregion
-
-    /// Flip carry flag
-    fn ccf(&mut self) {
-        self.reg.set_flag(Flag::SUB, false);
-        self.reg.set_flag(Flag::HC, false);
-        self.reg.set_flag(Flag::CARRY, !self.reg.get_flag(Flag::CARRY));
-        self.reg.pc = self.reg.pc.wrapping_add(1);
-    }
-
-    /// Get the one's complement of reg_a
-    fn cpl(&mut self) {
-        self.reg.set_register(Register::A, !self.reg.get_register(Register::A));
-        self.reg.set_flag(Flag::SUB, true);
-        self.reg.set_flag(Flag::HC, true);
-        self.reg.pc = self.reg.pc.wrapping_add(1);
-    }
-
-    /// Convert reg_a to binary coded decimal after BDC addition and subtraction
-    fn daa(&mut self) {
+    fn daa(&mut self) -> u8 {
         let mut a = self.reg.get_register(Register::A);
         let mut adjust = 0;
         let carry = self.reg.get_flag(Flag::CARRY);
         let half_carry = self.reg.get_flag(Flag::HC);
 
-        if self.reg.get_flag(Register::SUB) {
+        if self.reg.get_flag(Flag::SUB) {
             if half_carry {
                 adjust |= 0x06;
             }
@@ -1874,75 +1837,78 @@ impl CPU {
         if adjust >= 0x60 {
             self.reg.set_flag(Flag::CARRY, true);
         }
+
+        return 1;
     }
 
-    /// Disable Interrupts
-    fn di(&mut self) {
-        self.ime = false;
+    // cpl
+    /// Complement A
+    fn cpl(&mut self) -> u8 {
+        self.reg.set_register(Register::A, !self.reg.get_register(Register::A));
+        self.reg.set_flag(Flag::SUB, true);
+        self.reg.set_flag(Flag::HC, true);
         self.reg.pc = self.reg.pc.wrapping_add(1);
+        return 1;
     }
 
-    /// Enable Interrupts
-    fn ei(&mut self) {
-        self.ime = true;
+    // ccf
+    /// Complement Carry Flag
+    fn ccf(&mut self) -> u8 {
+        self.reg.set_flag(Flag::SUB, false);
+        self.reg.set_flag(Flag::HC, false);
+        self.reg.set_flag(Flag::CARRY, !self.reg.get_flag(Flag::CARRY));
         self.reg.pc = self.reg.pc.wrapping_add(1);
+        return 1;
     }
 
-    /// Halt CPU
-    fn halt(&self) {
-        println!("HALT");
-        panic!("Implement Halt");
+    // scf
+    /// Set Carry Flag
+    fn scf(&mut self) -> u8 {
+        self.reg.set_flag(Flag::SUB, false);
+        self.reg.set_flag(Flag::HC, false);
+        self.reg.set_flag(Flag::CARRY, true);
+        self.reg.pc = self.reg.pc.wrapping_add(1);
+
+        return 1;
     }
 
-    /// No opperation, continue
+    // nop
+    /// No Operation
     fn nop(&mut self) -> u8 {
         self.reg.pc = self.reg.pc.wrapping_add(1);
         return 1;
     }
 
-    /// Return if carry flag is not set
-    fn retnc(&mut self) {
-        if !self.reg.get_flag(Flag::CARRY) {
-            self.pop_pc();
-        }
-        else {
-            self.reg.pc = self.reg.pc.wrapping_add(1);
-        }
+    // halt
+    /// Halt CPU
+    fn halt(&mut self) -> u8 {
+        panic!("Halt not implemented");
+        //return 1;
     }
 
-    /// Return if zero flag is not set
-    fn retnz(&mut self) {
-        if !self.reg.get_flag(Flag::ZERO) {
-            self.pop_pc();
-        }
-        else {
-            self.reg.pc = self.reg.pc.wrapping_add(1);
-        }
+    // stop
+    /// Stop CPU
+    fn stop(&mut self) -> u8 {
+        panic!("Stop not implemented");
+        //return 1;
     }
 
-    /// Return if zero flag is set
-    fn retz(&mut self) {
-        if self.reg.get_flag(Flag::ZERO) {
-            self.pop_pc();
-        }
-        else {
-            self.reg.pc = self.reg.pc.wrapping_add(1);
-        }
-    }
-
-    /// Set Carry Flag
-    fn scf(&mut self) {
-        self.reg.set_flag(Flag::SUB, false);
-        self.reg.set_flag(Flag::HC, false);
-        self.reg.set_flag(Flag::CARRY, true);
+    // di
+    /// Disable Interrupts
+    fn di(&mut self) -> u8 {
+        self.ime = false;
         self.reg.pc = self.reg.pc.wrapping_add(1);
+        return 1;
     }
 
-    /// Stop instruction
-    fn stop(&self) {
-        println!("STOP");
-        panic!("Implement Stop");
+    // ei
+    /// Enable Interrupts
+    fn ei(&mut self) -> u8 {
+        self.ime = true;
+        self.reg.pc = self.reg.pc.wrapping_add(1);
+        return 1;
     }
+// endregion
 
     /// Print out the current state of the CPU
     pub fn log_state(&self, opcode: u8, pc: u16) {
@@ -1953,9 +1919,9 @@ impl CPU {
             Z:{} N:{} H:{} C:{}",
             pc,
             opcode,
-            self.get_next_byte(),
-            self.read_memory(self.reg.pc + 2),
-            self.read_memory(self.reg.pc + 3),
+            self.mmu.borrow().read_word(self.reg.pc),
+            self.mmu.borrow().read_byte(self.reg.pc + 2),
+            self.mmu.borrow().read_byte(self.reg.pc + 3),
             self.reg.get_register(Register::A),
             self.reg.get_register(Register::F),
             self.reg.get_register(Register::B),
@@ -1964,13 +1930,13 @@ impl CPU {
             self.reg.get_register(Register::E),
             self.reg.get_register(Register::H),
             self.reg.get_register(Register::L),
-            self.read_memory(self.reg.get_double_register(Register::A, Register::F)),
-            self.read_memory(self.reg.get_double_register(Register::B, Register::C)),
-            self.read_memory(self.reg.get_double_register(Register::D, Register::E)),
-            self.read_memory(self.reg.get_double_register(Register::H, Register::L)),
+            self.mmu.borrow().read_byte(self.reg.get_double_register(Register::A, Register::F)),
+            self.mmu.borrow().read_byte(self.reg.get_double_register(Register::B, Register::C)),
+            self.mmu.borrow().read_byte(self.reg.get_double_register(Register::D, Register::E)),
+            self.mmu.borrow().read_byte(self.reg.get_double_register(Register::H, Register::L)),
             self.reg.sp,
             self.reg.get_flag(Flag::ZERO),
-            self.reg.get_flag(Register::SUB),
+            self.reg.get_flag(Flag::SUB),
             self.reg.get_flag(Flag::HC),
             self.reg.get_flag(Flag::CARRY),
         );
