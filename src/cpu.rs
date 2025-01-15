@@ -71,18 +71,6 @@ impl CPU {
         0
     }
 
-    /// Retrieve the next Byte from memory
-    fn get_next_byte(&mut self) -> u8 {
-        let byte = self.mmu.borrow().read_byte(self.reg.pc);
-        return byte;
-    }
-
-    /// Retrieve the next 16-bit value from memory
-    fn get_next_word(&mut self) -> u16 {
-        let word = self.mmu.borrow().read_word(self.reg.pc.wrapping_add(1));
-        return word;
-    }
-
     /// Get OPCODE and execute the appropriate function
     pub fn execute(&mut self) -> u8 {
         let opcode = self.mmu.borrow().read_byte(self.reg.pc);
@@ -369,7 +357,7 @@ impl CPU {
     /// Load register with value of immediate
     fn ld_r_i(&mut self, reg: Register) -> u8 {
         // Get immediate 8 bits
-        let value = self.mmu.borrow().read_byte(self.reg.pc);
+        let value = self.mmu.borrow().read_byte(self.reg.pc.wrapping_add(1));
 
         // Load to proper register
         self.reg.set_register(reg, value);
@@ -399,7 +387,7 @@ impl CPU {
 
     /// Load 8-bit immediate value into address (HL)
     fn ld_hl_i(&mut self) -> u8 {
-        let value = self.mmu.borrow().read_byte(self.reg.pc);
+        let value = self.mmu.borrow().read_byte(self.reg.pc.wrapping_add(1));
         let address = self.reg.get_double_register(Register::H, Register::L);
 
         self.mmu.borrow_mut().write_byte(address, value);
@@ -519,7 +507,7 @@ impl CPU {
     // ldh (n), A
     /// Store contents of A in memory location specified by immediate value + 0xFF00
     fn ldi_ram_a(&mut self) -> u8 {
-        let address = 0xFF00 + self.mmu.borrow().read_byte(self.reg.pc) as u16;
+        let address = 0xFF00 + self.mmu.borrow().read_byte(self.reg.pc.wrapping_add(1)) as u16;
         let value = self.reg.get_register(Register::A);
         self.mmu.borrow_mut().write_byte(address, value);
         
@@ -530,7 +518,7 @@ impl CPU {
     // ldh A, (n)
     /// Load A with value at address specified by immediate value + 0xFF00
     fn ldi_a_ram(&mut self) -> u8 {
-        let address = 0xFF00 + self.mmu.borrow().read_byte(self.reg.pc) as u16;
+        let address = 0xFF00 + self.mmu.borrow().read_byte(self.reg.pc.wrapping_add(1)) as u16;
         let value = self.mmu.borrow_mut().read_byte(address);
         self.reg.set_register(Register::A, value);
         
@@ -573,7 +561,7 @@ impl CPU {
     // ld HL, (SP+e)
     /// Load HL with value at address specified by SP + immediate signed value
     fn ld_hl_sp(&mut self) -> u8 {
-        let e = self.mmu.borrow().read_byte(self.reg.pc) as i8;
+        let e = self.mmu.borrow().read_byte(self.reg.pc.wrapping_add(1)) as i8;
         let sp = self.reg.get_double_register(Register::SP, Register::SP);
         let result = sp.wrapping_add(e as u16);
 
@@ -639,7 +627,7 @@ impl CPU {
 
     /// Add immediate to register A
     fn add_i(&mut self) -> u8 {
-        let value = self.mmu.borrow().read_byte(self.reg.pc);
+        let value = self.mmu.borrow().read_byte(self.reg.pc.wrapping_add(1));
         let a = self.reg.get_register(Register::A);
         let (result, carry) = a.overflowing_add(value);
         
@@ -696,7 +684,7 @@ impl CPU {
 
     /// Add immediate with carry to reg A
     fn adc_i(&mut self) -> u8 {
-        let value = self.mmu.borrow().read_byte(self.reg.pc);
+        let value = self.mmu.borrow().read_byte(self.reg.pc.wrapping_add(1));
         let carry = self.reg.get_flag(Flag::CARRY);
         let (result, carry1) = self.reg.get_register(Register::A).overflowing_add(value);
         let (result, carry2) = result.overflowing_add(carry as u8);
@@ -754,7 +742,7 @@ impl CPU {
 
     /// Subtract immediate from register A
     fn sub_i(&mut self) -> u8 {
-        let value = self.mmu.borrow().read_byte(self.reg.pc);
+        let value = self.mmu.borrow().read_byte(self.reg.pc.wrapping_add(1));
         let (result, borrow) = self.reg.get_register(Register::A).overflowing_sub(value);
 
         // Set flags
@@ -813,7 +801,7 @@ impl CPU {
     /// Subtract immediate with carry from reg A
     fn sbc_i(&mut self) -> u8 {
         // Compute Result
-        let value = self.mmu.borrow().read_byte(self.reg.pc);        
+        let value = self.mmu.borrow().read_byte(self.reg.pc.wrapping_add(1));        
         let carry = self.reg.get_flag(Flag::CARRY);
 
         let (result, borrow1) = self.reg.get_register(Register::A).overflowing_sub(value);
@@ -875,7 +863,7 @@ impl CPU {
     /// Logical AND immediate with register A
     fn and_i(&mut self) -> u8 {
         // Calulate result
-        let value = self.mmu.borrow().read_byte(self.reg.pc);
+        let value = self.mmu.borrow().read_byte(self.reg.pc.wrapping_add(1));
         let result = self.reg.get_register(Register::A) & value;
 
         // Set Flags
@@ -931,7 +919,7 @@ impl CPU {
     /// Logical OR immediate with register A
     fn or_i(&mut self) -> u8 {
         // Calulate result
-        let value = self.mmu.borrow().read_byte(self.reg.pc);
+        let value = self.mmu.borrow().read_byte(self.reg.pc.wrapping_add(1));
         let result = self.reg.get_register(Register::A) | value;
 
         // Set Flags
@@ -987,7 +975,7 @@ impl CPU {
     /// Logical XOR immediate with register A
     fn xor_i(&mut self) -> u8 {
         // Calulate result
-        let value = self.mmu.borrow().read_byte(self.reg.pc);
+        let value = self.mmu.borrow().read_byte(self.reg.pc.wrapping_add(1));
         let result = self.reg.get_register(Register::A) ^ value;
 
         // Set Flags
@@ -1042,7 +1030,7 @@ impl CPU {
     /// Compare immediate with register A
     fn cp_i(&mut self) -> u8 {
         // Calulate result
-        let value = self.mmu.borrow().read_byte(self.reg.pc);
+        let value = self.mmu.borrow().read_byte(self.reg.pc.wrapping_add(1));
         let (result, borrow) = self.reg.get_register(Register::A).overflowing_sub(value);
 
         // Set Flags
@@ -1156,7 +1144,7 @@ impl CPU {
     // add SP, e
     /// Add immediate signed value to SP
     fn add_sp_i(&mut self) -> u8 {
-        let value = self.mmu.borrow().read_byte(self.reg.pc) as i8;
+        let value = self.mmu.borrow().read_byte(self.reg.pc.wrapping_add(1)) as i8;
         let result = self.reg.sp.wrapping_add(value as u16);
         self.reg.sp = result;
 
@@ -1630,32 +1618,58 @@ impl CPU {
 // region: Jump Operations
     // jp nn
     /// Jump to immediate 16-bit value
-    fn jp() {
+    fn jp(&mut self) -> u8 {
+        let address = self.mmu.borrow().read_word(self.reg.pc.wrapping_add(1));
+        self.reg.pc = address;
 
+        return 4;
     }
 
     // jp cc, nn
     /// Conditional Jump to immediate 16-bit value
-    fn jpcc() {
-
+    fn jpcc(&mut self, flag: Flag, condition: bool) -> u8 {
+        if self.reg.get_flag(flag) == condition {
+            let address = self.mmu.borrow().read_word(self.reg.pc.wrapping_add(1));
+            self.reg.pc = address;
+            return 4;
+        }
+        else {
+            self.reg.pc = self.reg.pc.wrapping_add(3);
+            return 3;
+        }
     }
 
     // jp (HL)
     /// Jump to address in HL
-    fn jphl() {
+    fn jphl(&mut self) -> u8 {
+        let address = self.reg.get_double_register(Register::H, Register::L);
+        self.reg.pc = address;
 
+        return 1;
     }
 
     // jr e
     /// Jump to immediate signed value
-    fn jr() {
+    fn jr(&mut self) -> u8 {
+        let offset = self.mmu.borrow().read_byte(self.reg.pc.wrapping_add(1)) as i8;
+        self.reg.pc = self.reg.pc.wrapping_add(2).wrapping_add(offset as u16);
 
+        return 3;
     }
 
     // jr cc, e
     /// Conditional Jump to immediate signed value
-    fn jrcc() {
+    fn jrcc(&mut self, flag: Flag, condition: bool) -> u8 {
+        if self.reg.get_flag(flag) == condition {
+            let offset = self.mmu.borrow().read_byte(self.reg.pc.wrapping_add(1)) as i8;
+            self.reg.pc = self.reg.pc.wrapping_add(2).wrapping_add(offset as u16);
 
+            return 3;
+        }
+        else {
+            self.reg.pc = self.reg.pc.wrapping_add(2);
+            return 2;
+        }
     }
 // endregion
 
@@ -1669,6 +1683,12 @@ impl CPU {
     // call cc, nn
     /// Conditional Call to immediate 16-bit value
     fn callcc() {
+
+    }
+
+    // RST f
+    /// Call to restart
+    fn rst() {
 
     }
 // endregion
@@ -1888,14 +1908,6 @@ impl CPU {
     fn halt(&self) {
         println!("HALT");
         panic!("Implement Halt");
-    }
-
-    // JUMP INSTRUCTIONS
-    /// Jump to address in next 16 bits
-    fn jp(&mut self) {
-        let address = self.get_operand_address();
-        self.reg.pc = address;
-
     }
 
     /// Jump if carry is set
