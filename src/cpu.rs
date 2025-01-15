@@ -1,92 +1,30 @@
 use crate::mmu::{self, RomMetadata, MMU};
+use crate::registers::{Flag, Reg, Register};
 use std::cell::RefCell;
 use std::rc::Rc;
 
-#[derive(Copy, Clone, PartialEq)]
-pub enum Register {
-    A,
-    B,
-    C,
-    D,
-    E,
-    H,
-    L,
-    F,
-    HL,
-    SP,
-    PC,
-    ZERO,
-    SUB,
-    HC,
-    CARRY,
-}
-
 pub struct CPU {
-    // 8 Bit Registers
-    reg_a: u8,
-    reg_b: u8,
-    reg_c: u8,
-    reg_d: u8,
-    reg_e: u8,
-    reg_h: u8,
-    reg_l: u8,
-
-    // 16 Bit Registers
-    pub pc: u16,
-    sp: u16,
-
-    // Flags
-    zero: bool,
-    sub: bool,
-    hc: bool,
-    carry: bool,
-
+    // Registers
+    reg: Reg,
     // Memory Management System
     mmu: Rc<RefCell<MMU>>,
 
-    // Interrupt Master Enable
+    // Interrupt Flags
     ime: bool,
+    halted: bool,
+    setdi: u8,
+    setei: u8,
 }
 
 impl CPU {
-    const IE: u16 = 0xFFFF;
-    const IF: u16 = 0xFF0F;
-    const INTERRUPT_VECTORS: [u16; 5] = [0x40, 0x48, 0x50, 0x58, 0x60];
-    const INTERRUPT_MASKS: [u8; 5] = [0x01, 0x02, 0x04, 0x08, 0x10];
-
     pub fn new(mmu: Rc<RefCell<MMU>>) -> CPU {
         CPU {
-            /*reg_a: 0x01,
-            reg_b: 0x00,
-            reg_c: 0x13,
-            reg_d: 0x00,
-            reg_e: 0xD8,
-            reg_h: 0x01,
-            reg_l: 0x4D,
-            pc: 0x0100,         // Gameboy starting address
-            sp: 0xFFFE,         // Stack Pointer starting address   
-            zero: true,
-            sub: false,
-            hc: false,
-            carry: false,
-            ime: true,
-            mmu,*/
-            
-            reg_a: 0x11,
-            reg_b: 0x00,
-            reg_c: 0x00,
-            reg_d: 0xFF,
-            reg_e: 0x56,
-            reg_h: 0x00,
-            reg_l: 0x0D,
-            pc: 0x0100,
-            sp: 0xFFFE, 
-            zero: true,
-            sub: false,
-            hc: false,
-            carry: false,
-            ime: true,
+            reg: Reg::new(),
             mmu,
+            ime: true,
+            halted: false,
+            setdi: 0,
+            setei: 0,
         }
     }
 
@@ -96,445 +34,333 @@ impl CPU {
     }
 
     /// Function to Run ROM by instruction
-    pub fn step(&mut self) {        
-        if self.ime {
-            //self.check_interrupts();
+    pub fn do_step(&mut self) -> u8 {        
+        let ticks = self.step() * 4;
+        return self.mmu.borrow_mut().do_step(ticks);
+    }
+
+    /// Function to Run ROM by instruction
+    fn step(&mut self) -> u8{
+        // Update Time
+        self.update_time();
+
+        // Handle Interrupts
+        match self.handle_interrupt() {
+            0 => {},
+            n => return n,
+        };
+
+        // Check if Stopped
+        if self.halted {
+            return 1;
         }
-        let opcode = self.read_memory(self.pc);
-        self.execute(opcode);
-        self.mmu.borrow_mut().tick(1);
+        else {
+            // Fetch and Execute Opcode
+            return self.execute();
+        }
+    }
+
+    /// Update the CPU time
+    fn update_time(&mut self) {
+        // TODO: Implement Timer
     }
 
     /// Test if an interrupt has been called
-    fn check_interrupts(&mut self) {
-        let ie = self.mmu.borrow().read_byte(Self::IE);
-        let mut if_ = self.mmu.borrow().read_byte(Self::IF);
-
-        for (i, &mask) in Self::INTERRUPT_MASKS.iter().enumerate() {
-            if (ie & mask) != 0 && (if_ & mask) != 0 {
-                if_ &= !mask;
-                self.mmu.borrow_mut().write_byte(Self::IF, if_);
-
-                self.push_pc();
-
-                self.ime = false;
-
-                self.pc = Self::INTERRUPT_VECTORS[i];
-                break;
-            }
-        }
+    fn handle_interrupt(&mut self) -> u8{
+        // TODO: Implement
+        0
     }
 
-    /// Print out the current state of the CPU
-    pub fn log_state(&self, opcode: u8, pc: u16) {
-        println!(
-            "PC: {:04X}, Opcode: {:02X}, op1: {:02X}, op2: {:02X}, op3: {:02X}\n
-            AF: {:02X}{:02X}, BC: {:02X}{:02X}, DE: {:02X}{:02X}, HL: {:02X}{:02X},\n
-            (AF): {:02X}, (BC): {:02X}, (DE): {:02X} (HL): {:02X} SP: {:04X},\n
-            Z:{} N:{} H:{} C:{}",
-            pc,
-            opcode,
-            self.read_memory(self.pc + 1),
-            self.read_memory(self.pc + 2),
-            self.read_memory(self.pc + 3),
-            self.read_register(Register::A),
-            self.read_register(Register::F),
-            self.read_register(Register::B),
-            self.read_register(Register::C),
-            self.read_register(Register::D),
-            self.read_register(Register::E),
-            self.read_register(Register::H),
-            self.read_register(Register::L),
-            self.read_memory(self.get_double_register(Register::A, Register::F)),
-            self.read_memory(self.get_double_register(Register::B, Register::C)),
-            self.read_memory(self.get_double_register(Register::D, Register::E)),
-            self.read_memory(self.get_double_register(Register::H, Register::L)),
-            self.sp,
-            self.read_flag(Register::ZERO),
-            self.read_flag(Register::SUB),
-            self.read_flag(Register::HC),
-            self.read_flag(Register::CARRY),
-        );
+    /// Retrieve the next Byte from memory
+    fn get_next_byte(&mut self) -> u8 {
+        let byte = self.mmu.borrow().read_byte(self.reg.pc);
+        self.reg.pc = self.reg.pc.wrapping_add(1);
+        return byte;
+    }
+
+    /// Retrieve the next 16-bit value from memory
+    fn read_next_word(&mut self) -> u16 {
+        let word = self.mmu.borrow().read_word(self.reg.pc);
+        self.reg.pc = self.reg.pc.wrapping_add(2);
+        return word;
     }
 
     /// Get OPCODE and execute the appropriate function
-    pub fn execute(&mut self, opcode: u8) {
-        self.log_state(opcode, self.pc);
+    pub fn execute(&mut self) -> u8 {
+        let opcode = self.get_next_byte();
         match opcode {
-            0xCB => {
-                let cb_opcode = self.read_memory(self.pc + 1);
-                self.execute_prefixed(cb_opcode);
-            }
-            _ =>
-            match opcode & 0xF0 {
-                0x00 => match opcode & 0x0F {
-                    0x00 => self.nop(),
-                    0x01 => self.ldi16(Register::B, Register::C),
-                    0x02 => self.ldr_a(Register::B, Register::C),
-                    0x03 => self.inc16(Register::B, Register::C),
-                    0x04 => self.inc(Register::B),
-                    0x05 => self.dec(Register::B, None),
-                    0x06 => self.ldi(Register::B),
-                    0x07 => self.rlca(),
-                    0x08 => self.ldisp(),
-                    0x09 => self.add16(Register::B, Register::C),
-                    0x0A => self.lda(Register::B, Register::C),
-                    0x0B => self.dec(Register::B, Some(Register::C)),
-                    0x0C => self.inc(Register::C),
-                    0x0D => self.dec(Register::C, None),
-                    0x0E => self.ldi(Register::C),
-                    0x0F => self.rrca(),
-                    _ => println!("Opcode not implemented: {:02X}", opcode),
-                },
-                0x10 => match opcode & 0x0F {
-                    0x00 => self.stop(),
-                    0x01 => self.ldi16(Register::D, Register::E),
-                    0x02 => self.ldr_a(Register::D, Register::E),
-                    0x03 => self.inc16(Register::D, Register::E),
-                    0x04 => self.inc(Register::D),
-                    0x05 => self.dec(Register::D, None),
-                    0x06 => self.ldi(Register::D),
-                    0x07 => self.rla(),
-                    0x08 => self.jr(),
-                    0x09 => self.add16(Register::D, Register::E),
-                    0x0A => self.lda(Register::D, Register::E),
-                    0x0B => self.dec(Register::D, Some(Register::E)),
-                    0x0C => self.inc(Register::E),
-                    0x0D => self.dec(Register::E, None),
-                    0x0E => self.ldi(Register::E),
-                    0x0F => self.rra(),
-                    _ => println!("Opcode not implemented: {:02X}", opcode),
-                },
-                0x20 => match opcode & 0x0F {
-                    0x00 => self.jrnz(),
-                    0x01 => self.ldi16(Register::H, Register::L),
-                    0x02 => self.ldhla(true, false),
-                    0x03 => self.inc16(Register::H, Register::L),
-                    0x04 => self.inc(Register::H),
-                    0x05 => self.dec(Register::H, None),
-                    0x06 => self.ldi(Register::H),
-                    0x07 => self.daa(),
-                    0x08 => self.jrz(),
-                    0x09 => self.add16(Register::H, Register::L),
-                    0x0A => self.ldahl(true, false),
-                    0x0B => self.dec(Register::H, Some(Register::L)),
-                    0x0C => self.inc(Register::L),
-                    0x0D => self.dec(Register::L, None),
-                    0x0E => self.ldi(Register::L),
-                    0x0F => self.cpl(),
-                    _ => println!("Opcode not implemented: {:02X}", opcode),
-                },
-                0x30 => match opcode & 0x0F {
-                    0x00 => self.jrnc(),
-                    0x01 => self.ldspi(),
-                    0x02 => self.ldhla(false, true),
-                    0x03 => self.inc16(Register::SP, Register::SP),
-                    0x04 => self.inc16(Register::H, Register::L),
-                    0x05 => self.dec(Register::H, Some(Register::L)),
-                    0x06 => self.ldihl(),
-                    0x07 => self.scf(),
-                    0x08 => self.jrc(),
-                    0x09 => self.add16(Register::SP, Register::SP),
-                    0x0A => self.ldahl(false, true),
-                    0x0B => self.dec16(Register::SP, Register::SP),
-                    0x0C => self.inc(Register::A),
-                    0x0D => self.dec(Register::A, None),
-                    0x0E => self.ldi(Register::A),
-                    0x0F => self.ccf(),
-                    _ => println!("Opcode not implemented: {:02X}", opcode),
-                },
-                0x40 => match opcode & 0x0F {
-                    0x00 => self.ld(Register::B, Register::B),
-                    0x01 => self.ld(Register::B, Register::C),
-                    0x02 => self.ld(Register::B, Register::D),
-                    0x03 => self.ld(Register::B, Register::E),
-                    0x04 => self.ld(Register::B, Register::H),
-                    0x05 => self.ld(Register::B, Register::L),
-                    0x06 => self.ld(Register::B, Register::HL),
-                    0x07 => self.ld(Register::B, Register::A),
-                    0x08 => self.ld(Register::C, Register::B),
-                    0x09 => self.ld(Register::C, Register::C),
-                    0x0A => self.ld(Register::C, Register::D),
-                    0x0B => self.ld(Register::C, Register::E),
-                    0x0C => self.ld(Register::C, Register::H),
-                    0x0D => self.ld(Register::C, Register::L),
-                    0x0E => self.ld(Register::C, Register::HL),
-                    0x0F => self.ld(Register::C, Register::A),
-                    _ => println!("Opcode not implemented: {:02X}", opcode),
-                },
-                0x50 => match opcode & 0x0F {
-                    0x00 => self.ld(Register::D, Register::B),
-                    0x01 => self.ld(Register::D, Register::C),
-                    0x02 => self.ld(Register::D, Register::D),
-                    0x03 => self.ld(Register::D, Register::E),
-                    0x04 => self.ld(Register::D, Register::H),
-                    0x05 => self.ld(Register::D, Register::L),
-                    0x06 => self.ld(Register::D, Register::HL),
-                    0x07 => self.ld(Register::D, Register::A),
-                    0x08 => self.ld(Register::E, Register::B),
-                    0x09 => self.ld(Register::E, Register::C),
-                    0x0A => self.ld(Register::E, Register::D),
-                    0x0B => self.ld(Register::E, Register::E),
-                    0x0C => self.ld(Register::E, Register::H),
-                    0x0D => self.ld(Register::E, Register::L),
-                    0x0E => self.ld(Register::E, Register::HL),
-                    0x0F => self.ld(Register::E, Register::A),
-                    _ => println!("Opcode not implemented: {:02X}", opcode),
-                },
-                0x60 => match opcode & 0x0F {
-                    0x00 => self.ld(Register::H, Register::B),
-                    0x01 => self.ld(Register::H, Register::C),
-                    0x02 => self.ld(Register::H, Register::D),
-                    0x03 => self.ld(Register::H, Register::E),
-                    0x04 => self.ld(Register::H, Register::H),
-                    0x05 => self.ld(Register::H, Register::L),
-                    0x06 => self.ld(Register::H, Register::HL),
-                    0x07 => self.ld(Register::H, Register::A),
-                    0x08 => self.ld(Register::L, Register::B),
-                    0x09 => self.ld(Register::L, Register::C),
-                    0x0A => self.ld(Register::L, Register::D),
-                    0x0B => self.ld(Register::L, Register::E),
-                    0x0C => self.ld(Register::L, Register::H),
-                    0x0D => self.ld(Register::L, Register::L),
-                    0x0E => self.ld(Register::L, Register::HL),
-                    0x0F => self.ld(Register::L, Register::A),
-                    _ => println!("Opcode not implemented: {:02X}", opcode),
-                },
-                0x70 => match opcode & 0x0F {
-                    0x00 => self.ld(Register::HL, Register::B),
-                    0x01 => self.ld(Register::HL, Register::C),
-                    0x02 => self.ld(Register::HL, Register::D),
-                    0x03 => self.ld(Register::HL, Register::E),
-                    0x04 => self.ld(Register::HL, Register::H),
-                    0x05 => self.ld(Register::HL, Register::L),
-                    0x06 => self.halt(),
-                    0x07 => self.ld(Register::HL, Register::A),
-                    0x08 => self.ld(Register::A, Register::B),
-                    0x09 => self.ld(Register::A, Register::C),
-                    0x0A => self.ld(Register::A, Register::D),
-                    0x0B => self.ld(Register::A, Register::E),
-                    0x0C => self.ld(Register::A, Register::H),
-                    0x0D => self.ld(Register::A, Register::L),
-                    0x0E => self.ld(Register::A, Register::HL),
-                    0x0F => self.ld(Register::A, Register::A),
-                    _ => println!("Opcode not implemented: {:02X}", opcode),
-                },
-                0x80 => match opcode & 0x0F {
-                    0x00 => self.add(Register::B),
-                    0x01 => self.add(Register::C),
-                    0x02 => self.add(Register::D),
-                    0x03 => self.add(Register::E),
-                    0x04 => self.add(Register::H),
-                    0x05 => self.add(Register::L),
-                    0x06 => self.add(Register::HL),
-                    0x07 => self.add(Register::A),
-                    0x08 => self.adc(Register::B),
-                    0x09 => self.adc(Register::C),
-                    0x0A => self.adc(Register::D),
-                    0x0B => self.adc(Register::E),
-                    0x0C => self.adc(Register::H),
-                    0x0D => self.adc(Register::L),
-                    0x0E => self.adc(Register::HL),
-                    0x0F => self.adc(Register::A),
-                    _ => println!("Opcode not implemented: {:02X}", opcode),
-                },
-                0x90 => match opcode & 0x0F {
-                    0x00 => self.sub(Register::B),
-                    0x01 => self.sub(Register::C),
-                    0x02 => self.sub(Register::D),
-                    0x03 => self.sub(Register::E),
-                    0x04 => self.sub(Register::H),
-                    0x05 => self.sub(Register::L),
-                    0x06 => self.sub(Register::HL),
-                    0x07 => self.sub(Register::A),
-                    0x08 => self.sbc(Register::B),
-                    0x09 => self.sbc(Register::C),
-                    0x0A => self.sbc(Register::D),
-                    0x0B => self.sbc(Register::E),
-                    0x0C => self.sbc(Register::H),
-                    0x0D => self.sbc(Register::L),
-                    0x0E => self.sbc(Register::HL),
-                    0x0F => self.sbc(Register::A),
-                    _ => println!("Opcode not implemented: {:02X}", opcode),
-                },
-                0xA0 => match opcode & 0x0F {
-                    0x00 => self.and(Register::B),
-                    0x01 => self.and(Register::C),
-                    0x02 => self.and(Register::D),
-                    0x03 => self.and(Register::E),
-                    0x04 => self.and(Register::H),
-                    0x05 => self.and(Register::L),
-                    0x06 => self.and(Register::HL),
-                    0x07 => self.and(Register::A),
-                    0x08 => self.xor(Register::B),
-                    0x09 => self.xor(Register::C),
-                    0x0A => self.xor(Register::D),
-                    0x0B => self.xor(Register::E),
-                    0x0C => self.xor(Register::H),
-                    0x0D => self.xor(Register::L),
-                    0x0E => self.xor(Register::HL),
-                    0x0F => self.xor(Register::A),
-                    _ => println!("Opcode not implemented: {:02X}", opcode),
-                },
-                0xB0 => match opcode & 0x0F {
-                    0x00 => self.or(Register::B),
-                    0x01 => self.or(Register::C),
-                    0x02 => self.or(Register::D),
-                    0x03 => self.or(Register::E),
-                    0x04 => self.or(Register::H),
-                    0x05 => self.or(Register::L),
-                    0x06 => self.or(Register::HL),
-                    0x07 => self.or(Register::A),
-                    0x08 => self.cp(Register::B),
-                    0x09 => self.cp(Register::C),
-                    0x0A => self.cp(Register::D),
-                    0x0B => self.cp(Register::E),
-                    0x0C => self.cp(Register::H),
-                    0x0D => self.cp(Register::L),
-                    0x0E => self.cp(Register::HL),
-                    0x0F => self.cp(Register::A),
-                    _ => println!("Opcode not implemented: {:02X}", opcode),
-                },
-                0xC0 => match opcode & 0x0F {
-                    0x00 => self.retnz(),
-                    0x01 => self.pop(Register::B, Register::C),
-                    0x02 => self.jpnz(),
-                    0x03 => self.jp(),
-                    0x04 => self.callnz(),
-                    0x05 => self.push(Register::B, Register::C),
-                    0x06 => self.addi(),
-                    0x07 => self.rst(0),
-                    0x08 => self.retz(),
-                    0x09 => self.ret(),
-                    0x0A => self.jpz(),
-                    0x0B => self.nop(),
-                    0x0C => self.callz(),
-                    0x0D => self.call(),
-                    0x0E => self.adci(),
-                    0x0F => self.rst(1),
-                    _ => println!("Opcode not implemented: {:02X}", opcode),
-                },
-                0xD0 => match opcode & 0x0F {
-                    0x00 => self.retnc(),
-                    0x01 => self.pop(Register::D, Register::E),
-                    0x02 => self.jpnc(),
-                    0x03 => self.nop(),
-                    0x04 => self.callnc(),
-                    0x05 => self.push(Register::D, Register::E),
-                    0x06 => self.subi(),
-                    0x07 => self.rst(2),
-                    0x08 => self.retc(),
-                    0x09 => self.reti(),
-                    0x0A => self.jpc(),
-                    0x0B => self.nop(),
-                    0x0C => self.callc(),
-                    0x0D => self.nop(),
-                    0x0E => self.sbci(),
-                    0x0F => self.rst(3),
-                    _ => println!("Opcode not implemented: {:02X}", opcode),
-                },
-                0xE0 => match opcode & 0x0F {
-                    0x00 => self.lda8_a(),
-                    0x01 => self.pop(Register::H, Register::L),
-                    0x02 => self.ldca(),
-                    0x03 => self.nop(),
-                    0x04 => self.nop(),
-                    0x05 => self.push(Register::H, Register::L),
-                    0x06 => self.andi(),
-                    0x07 => self.rst(4),
-                    0x08 => self.addspi(),
-                    0x09 => self.jphl(),
-                    0x0A => self.lda16_a(),
-                    0x0B => self.nop(),
-                    0x0C => self.nop(),
-                    0x0D => self.nop(),
-                    0x0E => self.xori(),
-                    0x0F => self.rst(5),
-                    _ => println!("Opcode not implemented: {:02X}", opcode),
-                },
-                0xF0 => match opcode & 0x0F {
-                    0x00 => self.lda_a8(),
-                    0x01 => self.pop(Register::A, Register::F),
-                    0x02 => self.ldac(),
-                    0x03 => self.di(),
-                    0x04 => self.nop(),
-                    0x05 => self.push(Register::A, Register::F),
-                    0x06 => self.ori(),
-                    0x07 => self.rst(6),
-                    0x08 => self.ldhlsp8(),
-                    0x09 => self.ldsphl(),
-                    0x0A => self.lda_a16(),
-                    0x0B => self.ei(),
-                    0x0C => self.nop(),
-                    0x0D => self.nop(),
-                    0x0E => self.cpi(),
-                    0x0F => self.rst(7),
-                    _ => println!("Opcode not implemented: {:02X}", opcode),
-                },
-                _ => println!("Opcode not implemented: {:02X}", opcode),
-            }
+            0x00 => self.nop(),
+            0x01 => self.ldi16(Register::B, Register::C),
+            0x02 => self.ld_adr_a(Register::B, Register::C),
+            0x03 => self.inc16(Register::B, Register::C),
+            0x04 => self.inc(Register::B),
+            0x05 => self.dec(Register::B, None),
+            0x06 => self.ldi(Register::B),
+            0x07 => self.rlca(),
+            0x08 => self.ldisp(),
+            0x09 => self.add16(Register::B, Register::C),
+            0x0A => self.lda(Register::B, Register::C),
+            0x0B => self.dec(Register::B, Some(Register::C)),
+            0x0C => self.inc(Register::C),
+            0x0D => self.dec(Register::C, None),
+            0x0E => self.ldi(Register::C),
+            0x0F => self.rrca(),
+            0x10 => self.stop(),
+            0x11 => self.ldi16(Register::D, Register::E),
+            0x12 => self.ld_adr_a(Register::D, Register::E),
+            0x13 => self.inc16(Register::D, Register::E),
+            0x14 => self.inc(Register::D),
+            0x15 => self.dec(Register::D, None),
+            0x16 => self.ldi(Register::D),
+            0x17 => self.rla(),
+            0x18 => self.jr(),
+            0x19 => self.add16(Register::D, Register::E),
+            0x1A => self.lda(Register::D, Register::E),
+            0x1B => self.dec(Register::D, Some(Register::E)),
+            0x1C => self.inc(Register::E),
+            0x1D => self.dec(Register::E, None),
+            0x1E => self.ldi(Register::E),
+            0x1F => self.rra(),
+            0x20 => self.jrnz(),
+            0x21 => self.ldi16(Register::H, Register::L),
+            0x22 => self.ldhla(true, false),
+            0x23 => self.inc16(Register::H, Register::L),
+            0x24 => self.inc(Register::H),
+            0x25 => self.dec(Register::H, None),
+            0x26 => self.ldi(Register::H),
+            0x27 => self.daa(),
+            0x28 => self.jrz(),
+            0x29 => self.add16(Register::H, Register::L),
+            0x2A => self.ldahl(true, false),
+            0x2B => self.dec(Register::H, Some(Register::L)),
+            0x2C => self.inc(Register::L),
+            0x2D => self.dec(Register::L, None),
+            0x2E => self.ldi(Register::L),
+            0x2F => self.cpl(),
+            0x30 => self.jrnc(),
+            0x31 => self.ldspi(),
+            0x32 => self.ldhla(false, true),
+            0x33 => self.inc16(Register::SP, Register::SP),
+            0x34 => self.inc16(Register::H, Register::L),
+            0x35 => self.dec(Register::H, Some(Register::L)),
+            0x36 => self.ldihl(),
+            0x37 => self.scf(),
+            0x38 => self.jrc(),
+            0x39 => self.add16(Register::SP, Register::SP),
+            0x3A => self.ldahl(false, true),
+            0x3B => self.dec16(Register::SP, Register::SP),
+            0x3C => self.inc(Register::A),
+            0x3D => self.dec(Register::A, None),
+            0x3E => self.ldi(Register::A),
+            0x3F => self.ccf(),
+            0x40 => self.ld(Register::B, Register::B),
+            0x41 => self.ld(Register::B, Register::C),
+            0x42 => self.ld(Register::B, Register::D),
+            0x43 => self.ld(Register::B, Register::E),
+            0x44 => self.ld(Register::B, Register::H),
+            0x45 => self.ld(Register::B, Register::L),
+            0x46 => self.ld(Register::B, Register::HL),
+            0x47 => self.ld(Register::B, Register::A),
+            0x48 => self.ld(Register::C, Register::B),
+            0x49 => self.ld(Register::C, Register::C),
+            0x4A => self.ld(Register::C, Register::D),
+            0x4B => self.ld(Register::C, Register::E),
+            0x4C => self.ld(Register::C, Register::H),
+            0x4D => self.ld(Register::C, Register::L),
+            0x4E => self.ld(Register::C, Register::HL),
+            0x4F => self.ld(Register::C, Register::A),
+            0x50 => self.ld(Register::D, Register::B),
+            0x51 => self.ld(Register::D, Register::C),
+            0x52 => self.ld(Register::D, Register::D),
+            0x53 => self.ld(Register::D, Register::E),
+            0x54 => self.ld(Register::D, Register::H),
+            0x55 => self.ld(Register::D, Register::L),
+            0x56 => self.ld(Register::D, Register::HL),
+            0x57 => self.ld(Register::D, Register::A),
+            0x58 => self.ld(Register::E, Register::B),
+            0x59 => self.ld(Register::E, Register::C),
+            0x5A => self.ld(Register::E, Register::D),
+            0x5B => self.ld(Register::E, Register::E),
+            0x5C => self.ld(Register::E, Register::H),
+            0x5D => self.ld(Register::E, Register::L),
+            0x5E => self.ld(Register::E, Register::HL),
+            0x5F => self.ld(Register::E, Register::A),
+            0x60 => self.ld(Register::H, Register::B),
+            0x61 => self.ld(Register::H, Register::C),
+            0x62 => self.ld(Register::H, Register::D),
+            0x63 => self.ld(Register::H, Register::E),
+            0x64 => self.ld(Register::H, Register::H),
+            0x65 => self.ld(Register::H, Register::L),
+            0x66 => self.ld(Register::H, Register::HL),
+            0x67 => self.ld(Register::H, Register::A),
+            0x68 => self.ld(Register::L, Register::B),
+            0x69 => self.ld(Register::L, Register::C),
+            0x6A => self.ld(Register::L, Register::D),
+            0x6B => self.ld(Register::L, Register::E),
+            0x6C => self.ld(Register::L, Register::H),
+            0x6D => self.ld(Register::L, Register::L),
+            0x6E => self.ld(Register::L, Register::HL),
+            0x6F => self.ld(Register::L, Register::A),
+            0x70 => self.ld(Register::HL, Register::B),
+            0x71 => self.ld(Register::HL, Register::C),
+            0x72 => self.ld(Register::HL, Register::D),
+            0x73 => self.ld(Register::HL, Register::E),
+            0x74 => self.ld(Register::HL, Register::H),
+            0x75 => self.ld(Register::HL, Register::L),
+            0x76 => self.halt(),
+            0x77 => self.ld(Register::HL, Register::A),
+            0x78 => self.ld(Register::A, Register::B),
+            0x79 => self.ld(Register::A, Register::C),
+            0x7A => self.ld(Register::A, Register::D),
+            0x7B => self.ld(Register::A, Register::E),
+            0x7C => self.ld(Register::A, Register::H),
+            0x7D => self.ld(Register::A, Register::L),
+            0x7E => self.ld(Register::A, Register::HL),
+            0x7F => self.ld(Register::A, Register::A),
+            0x80 => self.add(Register::B),
+            0x81 => self.add(Register::C),
+            0x82 => self.add(Register::D),
+            0x83 => self.add(Register::E),
+            0x84 => self.add(Register::H),
+            0x85 => self.add(Register::L),
+            0x86 => self.add(Register::HL),
+            0x87 => self.add(Register::A),
+            0x88 => self.adc(Register::B),
+            0x89 => self.adc(Register::C),
+            0x8A => self.adc(Register::D),
+            0x8B => self.adc(Register::E),
+            0x8C => self.adc(Register::H),
+            0x8D => self.adc(Register::L),
+            0x8E => self.adc(Register::HL),
+            0x8F => self.adc(Register::A),
+            0x90 => self.sub(Register::B),
+            0x91 => self.sub(Register::C),
+            0x92 => self.sub(Register::D),
+            0x93 => self.sub(Register::E),
+            0x94 => self.sub(Register::H),
+            0x95 => self.sub(Register::L),
+            0x96 => self.sub(Register::HL),
+            0x97 => self.sub(Register::A),
+            0x98 => self.sbc(Register::B),
+            0x99 => self.sbc(Register::C),
+            0x9A => self.sbc(Register::D),
+            0x9B => self.sbc(Register::E),
+            0x9C => self.sbc(Register::H),
+            0x9D => self.sbc(Register::L),
+            0x9E => self.sbc(Register::HL),
+            0x9F => self.sbc(Register::A),
+            0xA0 => self.and(Register::B),
+            0xA1 => self.and(Register::C),
+            0xA2 => self.and(Register::D),
+            0xA3 => self.and(Register::E),
+            0xA4 => self.and(Register::H),
+            0xA5 => self.and(Register::L),
+            0xA6 => self.and(Register::HL),
+            0xA7 => self.and(Register::A),
+            0xA8 => self.xor(Register::B),
+            0xA9 => self.xor(Register::C),
+            0xAA => self.xor(Register::D),
+            0xAB => self.xor(Register::E),
+            0xAC => self.xor(Register::H),
+            0xAD => self.xor(Register::L),
+            0xAE => self.xor(Register::HL),
+            0xAF => self.xor(Register::A),
+            0xB0 => self.or(Register::B),
+            0xB1 => self.or(Register::C),
+            0xB2 => self.or(Register::D),
+            0xB3 => self.or(Register::E),
+            0xB4 => self.or(Register::H),
+            0xB5 => self.or(Register::L),
+            0xB6 => self.or(Register::HL),
+            0xB7 => self.or(Register::A),
+            0xB8 => self.cp(Register::B),
+            0xB9 => self.cp(Register::C),
+            0xBA => self.cp(Register::D),
+            0xBB => self.cp(Register::E),
+            0xBC => self.cp(Register::H),
+            0xBD => self.cp(Register::L),
+            0xBE => self.cp(Register::HL),
+            0xBF => self.cp(Register::A),
+            0xC0 => self.retnz(),
+            0xC1 => self.pop(Register::B, Register::C),
+            0xC2 => self.jpnz(),
+            0xC3 => self.jp(),
+            0xC4 => self.callnz(),
+            0xC5 => self.push(Register::B, Register::C),
+            0xC6 => self.addi(),
+            0xC7 => self.rst(0),
+            0xC8 => self.retz(),
+            0xC9 => self.ret(),
+            0xCA => self.jpz(),
+            0xCB => self.nop(),
+            0xCC => self.callz(),
+            0xCD => self.call(),
+            0xCE => self.adci(),
+            0xCF => self.rst(1),
+            0xD0 => self.retnc(),
+            0xD1 => self.pop(Register::D, Register::E),
+            0xD2 => self.jpnc(),
+            0xD3 => self.nop(),
+            0xD4 => self.callnc(),
+            0xD5 => self.push(Register::D, Register::E),
+            0xD6 => self.subi(),
+            0xD7 => self.rst(2),
+            0xD8 => self.retc(),
+            0xD9 => self.reti(),
+            0xDA => self.jpc(),
+            0xDB => self.nop(),
+            0xDC => self.callc(),
+            0xDD => self.nop(),
+            0xDE => self.sbci(),
+            0xDF => self.rst(3),
+            0xE0 => self.lda8_a(),
+            0xE1 => self.pop(Register::H, Register::L),
+            0xE2 => self.ldca(),
+            0xE3 => self.nop(),
+            0xE4 => self.nop(),
+            0xE5 => self.push(Register::H, Register::L),
+            0xE6 => self.andi(),
+            0xE7 => self.rst(4),
+            0xE8 => self.addspi(),
+            0xE9 => self.jphl(),
+            0xEA => self.lda16_a(),
+            0xEB => self.nop(),
+            0xEC => self.nop(),
+            0xED => self.nop(),
+            0xEE => self.xori(),
+            0xEF => self.rst(5),
+            0xF0 => self.lda_a8(),
+            0xF1 => self.pop(Register::A, Register::F),
+            0xF2 => self.ldac(),
+            0xF3 => self.di(),
+            0xF4 => self.nop(),
+            0xF5 => self.push(Register::A, Register::F),
+            0xF6 => self.ori(),
+            0xF7 => self.rst(6),
+            0xF8 => self.ldhlsp8(),
+            0xF9 => self.ldsphl(),
+            0xFA => self.lda_a16(),
+            0xFB => self.ei(),
+            0xFC => self.nop(),
+            0xFD => self.nop(),
+            0xFE => self.cpi(),
+            0xFF => self.rst(7),
+            _ => println!("Opcode not implemented: {:02X}", opcode),
         }
     }
 
     /// Handle Prefixed CB OPCODES
-    fn execute_prefixed(&mut self, opcode: u8) {
+    fn execute_cb(&mut self, opcode: u8) {
         match opcode & 0xF0{
-            0x00 => match opcode & 0x0F {
-                _ => panic!("CB-prefixed opcode not implemented: {:02X}", opcode),
-            },
-            0x10 => match opcode & 0x0F {
-                _ => panic!("CB-prefixed opcode not implemented: {:02X}", opcode),
-            },
-            0x20 => match opcode & 0x0F {
-                _ => panic!("CB-prefixed opcode not implemented: {:02X}", opcode),
-            },
-            0x30 => match opcode & 0x0F {
-                _ => panic!("CB-prefixed opcode not implemented: {:02X}", opcode),
-            },
-            0x40 => match opcode & 0x0F {
-                _ => panic!("CB-prefixed opcode not implemented: {:02X}", opcode),
-            },
-            0x50 => match opcode & 0x0F {
-                _ => panic!("CB-prefixed opcode not implemented: {:02X}", opcode),
-            },
-            0x60 => match opcode & 0x0F {
-                _ => panic!("CB-prefixed opcode not implemented: {:02X}", opcode),
-            },
-            0x70 => match opcode & 0x0F {
-                _ => panic!("CB-prefixed opcode not implemented: {:02X}", opcode),
-            },
-            0x80 => match opcode & 0x0F {
-                _ => panic!("CB-prefixed opcode not implemented: {:02X}", opcode),
-            },
-            0x90 => match opcode & 0x0F {
-                _ => panic!("CB-prefixed opcode not implemented: {:02X}", opcode),
-            },
-            0xA0 => match opcode & 0x0F {
-                _ => panic!("CB-prefixed opcode not implemented: {:02X}", opcode),
-            },
-            0xB0 => match opcode & 0x0F {
-                _ => panic!("CB-prefixed opcode not implemented: {:02X}", opcode),
-            },
-            0xC0 => match opcode & 0x0F {
-                _ => panic!("CB-prefixed opcode not implemented: {:02X}", opcode),
-            },
-            0xD0 => match opcode & 0x0F {
-                _ => panic!("CB-prefixed opcode not implemented: {:02X}", opcode),
-            },
-            0xE0 => match opcode & 0x0F {
-                _ => panic!("CB-prefixed opcode not implemented: {:02X}", opcode),
-            },
-            0xF0 => match opcode & 0x0F {
-                _ => panic!("CB-prefixed opcode not implemented: {:02X}", opcode),
-            }
             _ => println!("CB-prefixed opcode not implemented: {:02X}", opcode),
         }
     }
 
+    /* 
     /// Read 8 bit value from register
     pub fn read_register(&self, reg: Register) -> u8 {
         match reg {
-            Register::A => self.reg_a,
+            Register::A => self.reg.get_register(Register::A),
             Register::B => self.reg_b,
             Register::C => self.reg_c,
             Register::D => self.reg_d,
@@ -546,21 +372,22 @@ impl CPU {
         }
     }
 
+     
     /// Write 8 bit value to register
     pub fn write_register(&mut self, reg: Register, value: u8) {
         match reg {
-            Register::A => self.reg_a = value,
+            Register::A => self.reg.get_register(Register::A) = value,
             Register::B => self.reg_b = value,
             Register::C => self.reg_c = value,
             Register::D => self.reg_d = value,
             Register::E => self.reg_e = value,
             Register::H => self.reg_h = value,
             Register::L => self.reg_l = value,
-            Register::F => {self.set_flag_register(value);},
-            Register::ZERO => self.zero = value != 0,
+            Register::F => {self.reg.set_flag_register(value);},
+            Flag::ZERO => self.zero = value != 0,
             Register::SUB => self.sub = value != 0,
-            Register::HC => self.hc = value != 0,
-            Register::CARRY => self.carry = value != 0,
+            Flag::HC => self.hc = value != 0,
+            Flag::CARRY => self.carry = value != 0,
             _ => panic!("Invalid register"),
         }
     }
@@ -568,10 +395,10 @@ impl CPU {
     /// Read the flag boolean value
     pub fn read_flag(&self, flag: Register) -> bool {
         match flag {
-            Register::ZERO => self.zero,
+            Flag::ZERO => self.zero,
             Register::SUB => self.sub,
-            Register::HC => self.hc,
-            Register::CARRY => self.carry,
+            Flag::HC => self.hc,
+            Flag::CARRY => self.carry,
             _ => panic!("Invalid flag register"),
         }
     }
@@ -579,10 +406,10 @@ impl CPU {
     /// Write flag boolean value
     pub fn write_flag(&mut self, flag: Register, value: bool) {
         match flag {
-            Register::ZERO => self.zero = value,
+            Flag::ZERO => self.zero = value,
             Register::SUB => self.sub = value,
-            Register::HC => self.hc = value,
-            Register::CARRY => self.carry = value,
+            Flag::HC => self.hc = value,
+            Flag::CARRY => self.carry = value,
             _ => panic!("Invalid flag register"),
         }
     }
@@ -618,291 +445,1012 @@ impl CPU {
     // OPCODE Helper Functions
     /// Function to get the address of an operand from an opcode
     fn get_operand_address(&self) -> u16 {
-        let low_byte = self.read_memory(self.pc + 1);
-        let high_byte = self.read_memory(self.pc + 2);
+        let low_byte = self.get_next_byte();
+        let high_byte = self.read_memory(self.reg.pc + 2);
         let address = ((high_byte as u16) << 8) | low_byte as u16;
         return address;
     }
 
     /// Get 16-bit address from two registers
     fn get_double_register(&self, reg1: Register, reg2: Register) -> u16 {
-        (self.read_register(reg1) as u16) << 8 | self.read_register(reg2) as u16
+        (self.reg.get_register(reg1) as u16) << 8 | self.reg.get_register(reg2) as u16
     }
 
     /// Set 16-bit value to two registers
     fn set_double_register(&mut self, reg1: Register, reg2: Register, value: u16) {
-        self.write_register(reg1, (value >> 8) as u8);
-        self.write_register(reg2, value as u8);
+        self.reg.set_register(reg1, (value >> 8) as u8);
+        self.reg.set_register(reg2, value as u8);
     }
 
-    // OPCODE Functions
+    */
 
-    /// Add reg and carry flag to reg_a, store in reg_a
-    fn adc(&mut self, reg: Register) {
-        let value;
-        let carry;
-        let mut result;
-        let carry1;
-        let carry2;
-        
-        match reg {
-            Register::HL => {
-                let address = self.get_double_register(Register::H, Register::L);
-                value = self.read_memory(address);
-                carry = self.read_flag(Register::CARRY) as u8;
-                (result, carry1) = self.read_register(Register::A).overflowing_add(value);
-                (result, carry2) = result.overflowing_add(carry as u8);
-            }
-            _ => {
-                value = self.read_register(reg);
-                carry = self.read_flag(Register::CARRY) as u8;
-                (result, carry1) = self.read_register(Register::A).overflowing_add(value);
-                (result, carry2) = result.overflowing_add(carry as u8);
-            }
-        }
-        
-        // Set flags
-        self.write_flag(Register::ZERO, result == 0);
-        self.write_flag(Register::SUB, false);
-        self.write_flag(Register::HC, ((self.read_register(Register::A) & 0x0F) + (value & 0x0F) + carry as u8) > 0x0F);
-        self.write_flag(Register::CARRY, carry1 || carry2);
-        
-        // Store result and continue
-        self.write_register(Register::A, result);
-        self.pc += 1;
+// OPCODE Functions
+// Load Operations
+    // 8-Bit Loads
+    // ld r, s
+    /// Load register with value of source
+    fn ldr() {
+
     }
 
-    /// Add an immediate 8-bit value and carry flag to the A register
-    fn adci(&mut self) {
-        let value = self.read_memory(self.pc + 1);
-        let carry = self.read_flag(Register::CARRY);
-        let (result, carry1) = self.read_register(Register::A).overflowing_add(value);
-        let (result, carry2) = result.overflowing_add(carry as u8);
-        
-        // Set flags
-        self.write_flag(Register::ZERO, result == 0);
-        self.write_flag(Register::SUB, false);
-        self.write_flag(Register::HC, ((self.read_register(Register::A) & 0x0F) + (value & 0x0F) + carry as u8) > 0x0F);
-        self.write_flag(Register::CARRY, carry1 || carry2);
-        
-        // Store result and continue
-        self.write_register(Register::A, result);
-        self.pc += 1;
+    // ld d, r
+    /// Load register into destination
+    fn ldd() {
+
     }
-    
-    /// Add reg to reg_a, store in reg_a
-    fn add(&mut self, reg: Register) {
-        let value = self.read_register(reg);
-        let a = self.read_register(Register::A);
+
+    // ld d, n
+    /// Load 8-bit immediate value into register
+    fn ldi() {
+
+    }
+
+    // ld A, (ss)
+    /// Load A with value at address in two registers
+    fn ld_a_adr() {
+
+    }
+
+    // ld (dd), A
+    /// Store contents of A in memory location specified by two registers
+    fn ld_adr_a(&mut self, reg1: Register, reg2: Register) -> u8 {
+        self.mmu.borrow_mut().write_byte(self.reg.get_double_register(reg1, reg2), self.reg.get_register(Register::A));
+        self.reg.pc.wrapping_add(1);
+
+        return 2;
+    }
+
+    // ld A, (C)
+    /// Load A with value at address in C + 0xFF00
+    fn ld_a_ram() {
+
+    }
+
+    // ld (C), A
+    /// Store contents of A in memory location specified by register C + 0xFF00
+    fn ld_ram_a() {
+
+    }
+
+    // ldd A, (HL)
+    /// Load A with value at address in HL, decrement HL
+    fn lddec_a_hl() {
+
+    }
+
+    // ldd (HL), A
+    /// Store contents of A in memory location specified by HL, decrement HL
+    fn lddec_hl_a() {
+
+    }
+
+    // ldi A, (HL)
+    /// Load A with value at address in HL, increment HL
+    fn ldinc_a_hl() {
+
+    }
+
+    // ldi (HL), A
+    /// Store contents of A in memory location specified by HL, increment HL
+    fn ldinc_hl_a() {
+
+    }
+
+    // ldh (n), A
+    /// Store contents of A in memory location specified by immediate value + 0xFF00
+    fn ldr_imm_a() {
+
+    }
+
+    // ldh A, (n)
+    /// Load A with value at address specified by immediate value + 0xFF00
+    fn ld_a_imm() {
+
+    }
+
+    // 16-Bit Loads
+    // ld dd, nn
+    /// Load 16-bit immediate value into double register
+    fn ldi16() {
+
+    }
+
+    // ld (nn), SP
+    /// Store contents of SP in memory location specified by immediate value
+    fn ld_adr_sp() {
+
+    }
+
+    // ld SP, HL
+    /// Load SP with HL
+    fn ld_sp_hl() {
+
+    }
+
+    // ld HL, (SP+e)
+    /// Load HL with value at address specified by SP + immediate signed value
+    fn ld_hl_sp() {
+
+    }
+
+    // push ss
+    /// Push double register onto stack
+    fn push() {
+
+    }
+
+    // pop dd
+    /// Pop double register from stack
+    fn pop() {
+
+    }
+
+ // ALU Operations
+    // 8-Bit Operations
+    // add A, s
+    /// Add reg to register A
+    fn addr(&mut self, reg: Register) -> u8 {
+        let value = self.reg.get_register(reg);
+        let a = self.reg.get_register(Register::A);
         let (result, carry) = a.overflowing_add(value);
         
         // Set flags
-        self.write_flag(Register::ZERO, result == 0);
-        self.write_flag(Register::SUB, false);
-        self.write_flag(Register::HC, (((a & 0xF) + (value & 0xF))) > 0x0F);
-        self.write_flag(Register::CARRY, carry);
+        self.reg.set_flag(Flag::ZERO, result == 0);
+        self.reg.set_flag(Flag::SUB, false);
+        self.reg.set_flag(Flag::HC, ((result & 0x0F) + (value & 0x0F) as u8) > 0x0F);
+        self.reg.set_flag(Flag::CARRY, carry);
         
         // Store result and continue
-        self.write_register(Register::A, result);
-        self.pc += 1;
+        self.reg.set_register(Register::A, result);
+        self.reg.pc = self.reg.pc.wrapping_add(1);
+        return 1;
     }
 
-    /// Add an immediate 8-bit value to the A register
-    fn addi(&mut self) {
-        let value = self.read_memory(self.pc + 1);
-        let (result, carry) = self.read_register(Register::A).overflowing_add(value);
+    /// Add immediate to register A
+    fn addi(&mut self) -> u8 {
+        let value = self.get_next_byte();
+        let a = self.reg.get_register(Register::A);
+        let (result, carry) = a.overflowing_add(value);
         
         // Set flags
-        self.write_flag(Register::ZERO, result == 0);
-        self.write_flag(Register::SUB, false);
-        self.write_flag(Register::HC, self.read_register(Register::A) & 0x0F < value & 0x0F);
-        self.write_flag(Register::CARRY, carry);
+        self.reg.set_flag(Flag::ZERO, result == 0);
+        self.reg.set_flag(Flag::SUB, false);
+        self.reg.set_flag(Flag::HC, ((result & 0x0F) + (value & 0x0F) as u8) > 0x0F);
+        self.reg.set_flag(Flag::CARRY, carry);
         
         // Store result and continue
-        self.write_register(Register::A, result);
-        self.pc += 1;
+        self.reg.set_register(Register::A, result);
+        self.reg.pc = self.reg.pc.wrapping_add(2);
+        return 2;
     }
 
-    /// Add two registers to HL
-    fn add16(&mut self, reg1: Register, reg2: Register) {
-        let value = self.get_double_register(reg1, reg2);
-        let result = self.get_double_register(Register::H, Register::L).wrapping_add(value);
-        self.write_register(Register::H, (result >> 8) as u8);
-        self.write_register(Register::L, result as u8);
-
-        // Set Flags
-        self.write_flag(Register::SUB, false);
-        self.write_flag(Register::HC, (self.get_double_register(Register::H, Register::L) & 0x0FFF) < (value & 0x0FFF));
-        self.write_flag(Register::CARRY, self.get_double_register(Register::H, Register::L) > 0xFFFF - value);
-
-        self.pc += 1;
+    /// Add address (HL) to register A
+    fn adda(&mut self) -> u8 {
+        let adr = self.reg.get_double_register(Register::H, Register::L);
+        let value = self.mmu.borrow().read_byte(adr);
+        let a = self.reg.get_register(Register::A);
+        let (result, carry) = a.overflowing_add(value);
+        
+        // Set flags
+        self.reg.set_flag(Flag::ZERO, result == 0);
+        self.reg.set_flag(Flag::SUB, false);
+        self.reg.set_flag(Flag::HC, ((result & 0x0F) + (value & 0x0F) as u8) > 0x0F);
+        self.reg.set_flag(Flag::CARRY, carry);
+        
+        // Store result and continue
+        self.reg.set_register(Register::A, result);
+        self.reg.pc = self.reg.pc.wrapping_add(1);
+        return 2;
     }
 
-    /// Add content of immediate 2's complement operand to the stack pointer
-    fn addspi(&mut self) {
-        let value = self.read_memory(self.pc + 1) as i8;
-        let result = self.sp.wrapping_add(value as u16);
-        self.sp = result;
-
-        // Set Flags
-        self.write_flag(Register::ZERO, false);
-        self.write_flag(Register::SUB, false);
-        self.write_flag(Register::HC, (self.sp & 0x0F) + ((value as u16) & 0x0F) > 0x0F);
-        self.write_flag(Register::CARRY, (self.sp & 0xFF) + ((value as u16) & 0xFF) > 0xFF);
-
-        self.pc += 2;
+    // adc A, s
+    /// Add reg with carry to reg A
+    fn adcr(&mut self, reg: Register) -> u8{
+        let value = self.reg.get_register(reg);
+        let carry = self.reg.get_flag(Flag::CARRY);
+        let (result, carry1) = self.reg.get_register(Register::A).overflowing_add(value);
+        let (result, carry2) = result.overflowing_add(carry as u8);
+        
+        // Set flags
+        self.reg.set_flag(Flag::ZERO, result == 0);
+        self.reg.set_flag(Flag::SUB, false);
+        self.reg.set_flag(Flag::HC, ((result & 0x0F) + (value & 0x0F) + carry as u8) > 0x0F);
+        self.reg.set_flag(Flag::CARRY, carry1 || carry2);
+        
+        // Store result and continue
+        self.reg.set_register(Register::A, result);
+        self.reg.pc = self.reg.pc.wrapping_add(1);
+        return 1;
     }
 
-    /// AND reg with reg_a, store in reg_a
-    fn and(&mut self, reg: Register) {
-        // Calulate result
-        let value = self.read_register(reg);
-        let result = self.read_register(Register::A) & value;
+    /// Add immediate with carry to reg A
+    fn adci(&mut self) -> u8 {
+        let value = self.get_next_byte();
+        let carry = self.reg.get_flag(Flag::CARRY);
+        let (result, carry1) = self.reg.get_register(Register::A).overflowing_add(value);
+        let (result, carry2) = result.overflowing_add(carry as u8);
+        
+        // Set flags
+        self.reg.set_flag(Flag::ZERO, result == 0);
+        self.reg.set_flag(Flag::SUB, false);
+        self.reg.set_flag(Flag::HC, ((result & 0x0F) + (value & 0x0F) + carry as u8) > 0x0F);
+        self.reg.set_flag(Flag::CARRY, carry1 || carry2);
+        
+        // Store result and continue
+        self.reg.set_register(Register::A, result);
+        self.reg.pc = self.reg.pc.wrapping_add(1);
+        return 2;
+    }
 
-        // Set Flags
-        self.write_flag(Register::ZERO, result == 0);
-        self.write_flag(Register::SUB, false);
-        self.write_flag(Register::HC, true);
-        self.write_flag(Register::CARRY, false);
+    /// Add address (HL) with carry to reg A
+    fn adca(&mut self) -> u8{
+        let adr = self.reg.get_double_register(Register::H, Register::L);
+        let value = self.mmu.borrow().read_byte(adr);
+        let carry = self.reg.get_flag(Flag::CARRY);
+        let (result, carry1) = self.reg.get_register(Register::A).overflowing_add(value);
+        let (result, carry2) = result.overflowing_add(carry as u8);
+        
+        // Set flags
+        self.reg.set_flag(Flag::ZERO, result == 0);
+        self.reg.set_flag(Flag::SUB, false);
+        self.reg.set_flag(Flag::HC, ((result & 0x0F) + (value & 0x0F) + carry as u8) > 0x0F);
+        self.reg.set_flag(Flag::CARRY, carry1 || carry2);
+        
+        // Store result and continue
+        self.reg.set_register(Register::A, result);
+        self.reg.pc = self.reg.pc.wrapping_add(1);
+        return 2;
+    }
+
+    // sub s
+    /// Subtract reg from register A
+    fn subr(&mut self, reg: Register) -> u8 {
+        // Compute Result
+        let value = self.reg.get_register(reg);
+        let (result, borrow) = self.reg.get_register(Register::A).overflowing_sub(value);
+
+        // Set flags
+        self.reg.set_flag(Flag::ZERO, result == 0);
+        self.reg.set_flag(Flag::SUB, true);
+        self.reg.set_flag(Flag::HC, (result & 0x0F) < (value & 0x0F));
+        self.reg.set_flag(Flag::CARRY, borrow);
 
         // Store result and continue
-        self.write_register(Register::A, result);
-        self.pc += 1;
+        self.reg.set_register(Register::A, result);
+        self.reg.pc = self.reg.pc.wrapping_add(1);
+        return 1;
     }
 
-    /// AND immediate 8-bit value with reg_a, store in reg_a
-    fn andi(&mut self) {
-        // Calulate result
-        let value = self.read_memory(self.pc + 1);
-        let result = self.read_register(Register::A) & value;
+    /// Subtract immediate from register A
+    fn subi(&mut self) -> u8 {
+        let value = self.get_next_byte();
+        let (result, borrow) = self.reg.get_register(Register::A).overflowing_sub(value);
 
-        // Set Flags
-        self.write_flag(Register::ZERO, result == 0);
-        self.write_flag(Register::SUB, false);
-        self.write_flag(Register::HC, true);
-        self.write_flag(Register::CARRY, false);
+        // Set flags
+        self.reg.set_flag(Flag::ZERO, result == 0);
+        self.reg.set_flag(Flag::SUB, true);
+        self.reg.set_flag(Flag::HC, (result & 0x0F) < (value & 0x0F));
+        self.reg.set_flag(Flag::CARRY, borrow);
 
         // Store result and continue
-        self.write_register(Register::A, result);
-        self.pc += 1;
+        self.reg.set_register(Register::A, result);
+        self.reg.pc = self.reg.pc.wrapping_add(2);
+        return 2;
+    }
+
+    /// Subtract address (HL) from register A
+    fn suba(&mut self) -> u8 {
+        // Compute Result
+        let adr = self.reg.get_double_register(Register::H, Register::L);
+        let value = self.mmu.borrow().read_byte(adr);
+        let (result, borrow) = self.reg.get_register(Register::A).overflowing_sub(value);
+
+        // Set flags
+        self.reg.set_flag(Flag::ZERO, result == 0);
+        self.reg.set_flag(Flag::SUB, true);
+        self.reg.set_flag(Flag::HC, (result & 0x0F) < (value & 0x0F));
+        self.reg.set_flag(Flag::CARRY, borrow);
+
+        // Store result and continue
+        self.reg.set_register(Register::A, result);
+        self.reg.pc = self.reg.pc.wrapping_add(1);
+        return 2;
+    }
+
+    // sbc A, s
+    /// Subtract reg with carry from reg A
+    fn sbcr(&mut self, reg: Register) -> u8 {
+        // Compute Result
+        let value = self.reg.get_register(reg);        
+        let carry = self.reg.get_flag(Flag::CARRY);
+
+        let (result, borrow1) = self.reg.get_register(Register::A).overflowing_sub(value);
+        let (result, borrow2) = result.overflowing_sub(carry as u8);
+
+        // Set flags
+        self.reg.set_flag(Flag::ZERO, result == 0);
+        self.reg.set_flag(Flag::SUB, true);
+        self.reg.set_flag(Flag::HC, (result & 0x0F) < ((value & 0x0F) + carry as u8));
+        self.reg.set_flag(Flag::CARRY, borrow1 || borrow2);
+
+        // Store result and continue
+        self.reg.set_register(Register::A, result);
+        self.reg.pc = self.reg.pc.wrapping_add(1);
+        return 1;
+    }
+
+    /// Subtract immediate with carry from reg A
+    fn sbci(&mut self) -> u8 {
+        // Compute Result
+        let value = self.get_next_byte();        
+        let carry = self.reg.get_flag(Flag::CARRY);
+
+        let (result, borrow1) = self.reg.get_register(Register::A).overflowing_sub(value);
+        let (result, borrow2) = result.overflowing_sub(carry as u8);
+
+        // Set flags
+        self.reg.set_flag(Flag::ZERO, result == 0);
+        self.reg.set_flag(Flag::SUB, true);
+        self.reg.set_flag(Flag::HC, (result & 0x0F) < ((value & 0x0F) + carry as u8));
+        self.reg.set_flag(Flag::CARRY, borrow1 || borrow2);
+
+        // Store result and continue
+        self.reg.set_register(Register::A, result);
+        self.reg.pc = self.reg.pc.wrapping_add(2);
+        return 2;
+    }
+
+    /// Subtract address (HL) with carry from reg A
+    fn sbca(&mut self) -> u8 {
+        // Compute Result
+        let adr = self.reg.get_double_register(Register::H, Register::L);
+        let value = self.mmu.borrow().read_byte(adr);        
+        let carry = self.reg.get_flag(Flag::CARRY);
+
+        let (result, borrow1) = self.reg.get_register(Register::A).overflowing_sub(value);
+        let (result, borrow2) = result.overflowing_sub(carry as u8);
+
+        // Set flags
+        self.reg.set_flag(Flag::ZERO, result == 0);
+        self.reg.set_flag(Flag::SUB, true);
+        self.reg.set_flag(Flag::HC, (result & 0x0F) < ((value & 0x0F) + carry as u8));
+        self.reg.set_flag(Flag::CARRY, borrow1 || borrow2);
+
+        // Store result and continue
+        self.reg.set_register(Register::A, result);
+        self.reg.pc = self.reg.pc.wrapping_add(1);
+        return 2;
+    }
+
+    // and s
+    /// Logical AND reg with register A
+    fn andr(&mut self, reg: Register) -> u8 {
+        // Calulate result
+        let value = self.reg.get_register(reg);
+        let result = self.reg.get_register(Register::A) & value;
+
+        // Set Flags
+        self.reg.set_flag(Flag::ZERO, result == 0);
+        self.reg.set_flag(Flag::SUB, false);
+        self.reg.set_flag(Flag::HC, true);
+        self.reg.set_flag(Flag::CARRY, false);
+
+        // Store result and continue
+        self.reg.set_register(Register::A, result);
+        self.reg.pc = self.reg.pc.wrapping_add(1);
+        return 1;
+    }
+
+    /// Logical AND immediate with register A
+    fn andi(&mut self) -> u8 {
+        // Calulate result
+        let value = self.get_next_byte();
+        let result = self.reg.get_register(Register::A) & value;
+
+        // Set Flags
+        self.reg.set_flag(Flag::ZERO, result == 0);
+        self.reg.set_flag(Flag::SUB, false);
+        self.reg.set_flag(Flag::HC, true);
+        self.reg.set_flag(Flag::CARRY, false);
+
+        // Store result and continue
+        self.reg.set_register(Register::A, result);
+        self.reg.pc = self.reg.pc.wrapping_add(2);
+        return 2;
+    }
+
+    /// Logical AND address (HL) with register A
+    fn anda(&mut self) -> u8 {
+        // Calulate result
+        let adr = self.reg.get_double_register(Register::H, Register::L);
+        let value = self.mmu.borrow().read_byte(adr);
+        let result = self.reg.get_register(Register::A) & value;
+
+        // Set Flags
+        self.reg.set_flag(Flag::ZERO, result == 0);
+        self.reg.set_flag(Flag::SUB, false);
+        self.reg.set_flag(Flag::HC, true);
+        self.reg.set_flag(Flag::CARRY, false);
+
+        // Store result and continue
+        self.reg.set_register(Register::A, result);
+        self.reg.pc = self.reg.pc.wrapping_add(1);
+        return 2;
+    }
+
+    // or s
+    /// Logical OR reg with register A
+    fn orr(&mut self, reg: Register) -> u8 {
+        // Calulate result
+        let value = self.reg.get_register(reg);
+        let result = self.reg.get_register(Register::A) | value;
+
+        // Set Flags
+        self.reg.set_flag(Flag::ZERO, result == 0);
+        self.reg.set_flag(Flag::SUB, false);
+        self.reg.set_flag(Flag::HC, false);
+        self.reg.set_flag(Flag::CARRY, false);
+
+        // Store result and continue
+        self.reg.set_register(Register::A, result);
+        self.reg.pc = self.reg.pc.wrapping_add(1);
+        return 1;
+    }
+
+    /// Logical OR immediate with register A
+    fn ori(&mut self) -> u8 {
+        // Calulate result
+        let value = self.get_next_byte();
+        let result = self.reg.get_register(Register::A) | value;
+
+        // Set Flags
+        self.reg.set_flag(Flag::ZERO, result == 0);
+        self.reg.set_flag(Flag::SUB, false);
+        self.reg.set_flag(Flag::HC, false);
+        self.reg.set_flag(Flag::CARRY, false);
+
+        // Store result and continue
+        self.reg.set_register(Register::A, result);
+        self.reg.pc = self.reg.pc.wrapping_add(2);
+        return 2;
+    }
+
+    /// Logical OR address (HL) with register A
+    fn ora(&mut self) -> u8 {
+        // Calulate result
+        let adr = self.reg.get_double_register(Register::H, Register::L);
+        let value = self.mmu.borrow().read_byte(adr);
+        let result = self.reg.get_register(Register::A) | value;
+
+        // Set Flags
+        self.reg.set_flag(Flag::ZERO, result == 0);
+        self.reg.set_flag(Flag::SUB, false);
+        self.reg.set_flag(Flag::HC, false);
+        self.reg.set_flag(Flag::CARRY, false);
+
+        // Store result and continue
+        self.reg.set_register(Register::A, result);
+        self.reg.pc = self.reg.pc.wrapping_add(1);
+        return 2;
+    }
+
+    // xor s
+    /// Logical XOR reg with register A
+    fn xorr(&mut self, reg: Register) -> u8 {
+        // Calulate result
+        let value = self.reg.get_register(reg);
+        let result = self.reg.get_register(Register::A) ^ value;
+
+        // Set Flags
+        self.reg.set_flag(Flag::ZERO, result == 0);
+        self.reg.set_flag(Flag::SUB, false);
+        self.reg.set_flag(Flag::HC, false);
+        self.reg.set_flag(Flag::CARRY, false);
+
+        // Store result and continue
+        self.reg.set_register(Register::A, result);
+        self.reg.pc = self.reg.pc.wrapping_add(1);
+        return 1;
+    }
+
+    /// Logical XOR immediate with register A
+    fn xori(&mut self) -> u8 {
+        // Calulate result
+        let value = self.get_next_byte();
+        let result = self.reg.get_register(Register::A) ^ value;
+
+        // Set Flags
+        self.reg.set_flag(Flag::ZERO, result == 0);
+        self.reg.set_flag(Flag::SUB, false);
+        self.reg.set_flag(Flag::HC, false);
+        self.reg.set_flag(Flag::CARRY, false);
+
+        // Store result and continue
+        self.reg.set_register(Register::A, result);
+        self.reg.pc = self.reg.pc.wrapping_add(2);
+        return 2;
+    }
+
+    /// Logical XOR address (HL) with register A
+    fn xora(&mut self) -> u8 {
+        // Calulate result
+        let adr = self.reg.get_double_register(Register::H, Register::L);
+        let value = self.mmu.borrow().read_byte(adr);
+        let result = self.reg.get_register(Register::A) ^ value;
+
+        // Set Flags
+        self.reg.set_flag(Flag::ZERO, result == 0);
+        self.reg.set_flag(Flag::SUB, false);
+        self.reg.set_flag(Flag::HC, false);
+        self.reg.set_flag(Flag::CARRY, false);
+
+        // Store result and continue
+        self.reg.set_register(Register::A, result);
+        self.reg.pc = self.reg.pc.wrapping_add(1);
+        return 2;
+    }
+
+    // cp s
+    /// Compare reg with register A
+    fn cpr(&mut self, reg: Register) -> u8 {
+        // Calulate result
+        let value = self.reg.get_register(reg);
+        let (result, borrow) = self.reg.get_register(Register::A).overflowing_sub(value);
+
+        // Set Flags
+        self.reg.set_flag(Flag::ZERO, result == 0);
+        self.reg.set_flag(Flag::SUB, true);
+        self.reg.set_flag(Flag::HC, (result & 0x0F) < ((value & 0x0F)));
+        self.reg.set_flag(Flag::CARRY, borrow);
+
+        // Continue
+        self.reg.pc = self.reg.pc.wrapping_add(1);
+        return 1;
+    }
+
+    /// Compare immediate with register A
+    fn cpi(&mut self) -> u8 {
+        // Calulate result
+        let value = self.get_next_byte();
+        let (result, borrow) = self.reg.get_register(Register::A).overflowing_sub(value);
+
+        // Set Flags
+        self.reg.set_flag(Flag::ZERO, result == 0);
+        self.reg.set_flag(Flag::SUB, true);
+        self.reg.set_flag(Flag::HC, (result & 0x0F) < ((value & 0x0F)));
+        self.reg.set_flag(Flag::CARRY, borrow);
+
+        // Continue
+        self.reg.pc = self.reg.pc.wrapping_add(2);
+        return 2;
+    }
+
+    /// Compare address (HL) with register A
+    fn cpa(&mut self) -> u8 {
+        // Calulate result
+        let adr = self.reg.get_double_register(Register::H, Register::L);
+        let value = self.mmu.borrow().read_byte(adr);
+        let (result, borrow) = self.reg.get_register(Register::A).overflowing_sub(value);
+
+        // Set Flags
+        self.reg.set_flag(Flag::ZERO, result == 0);
+        self.reg.set_flag(Flag::SUB, true);
+        self.reg.set_flag(Flag::HC, (result & 0x0F) < ((value & 0x0F)));
+        self.reg.set_flag(Flag::CARRY, borrow);
+
+        // Continue
+        self.reg.pc = self.reg.pc.wrapping_add(1);
+        return 2;
+    }
+
+    // inc s
+    /// Increment register
+    fn inc(&mut self, reg: Register) -> u8 {
+        let value = self.reg.get_register(reg).wrapping_add(1);
+        self.reg.set_register(reg, value);
+
+        // Set Flags
+        self.reg.set_flag(Flag::ZERO, value == 0);
+        self.reg.set_flag(Flag::SUB, false);
+        self.reg.set_flag(Flag::HC, (value & 0x0F) == 0);
+
+        self.reg.pc = self.reg.pc.wrapping_add(1);
+        return 1;
+    }
+
+    /// Increment address (HL)
+    fn inca(&mut self) -> u8 {
+        let adr = self.reg.get_double_register(Register::H, Register::L);
+        let value = self.mmu.borrow().read_byte(adr).wrapping_add(1);
+        self.mmu.borrow_mut().write_byte(adr, value);
+
+        // Set Flags
+        self.reg.set_flag(Flag::ZERO, value == 0);
+        self.reg.set_flag(Flag::SUB, false);
+        self.reg.set_flag(Flag::HC, (value & 0x0F) == 0);
+
+        self.reg.pc = self.reg.pc.wrapping_add(1);
+        return 3;
+    }
+
+    // dec s
+    /// Decrement register
+    fn dec(&mut self, reg: Register) -> u8 {
+        let value = self.reg.get_register(reg).wrapping_sub(1);
+        self.reg.set_register(reg, value);
+
+
+        // Set Flags
+        self.reg.set_flag(Flag::ZERO, value == 0);
+        self.reg.set_flag(Flag::SUB, true);
+        self.reg.set_flag(Flag::HC, (value & 0x0F) == 0x0F);
+
+        self.reg.pc = self.reg.pc.wrapping_add(1);
+        return 1;
+    }
+
+    /// Decrement address (HL)
+    fn deca(&mut self) -> u8 {
+        let adr = self.reg.get_double_register(Register::H, Register::L);
+        let value = self.mmu.borrow().read_byte(adr).wrapping_sub(1);
+        self.mmu.borrow_mut().write_byte(adr, value);
+
+
+        // Set Flags
+        self.reg.set_flag(Flag::ZERO, value == 0);
+        self.reg.set_flag(Flag::SUB, true);
+        self.reg.set_flag(Flag::HC, (value & 0x0F) == 0x0F);
+
+        self.reg.pc = self.reg.pc.wrapping_add(1);
+        return 3;
+    }
+
+    // 16-Bit Operations
+    // add HL, ss
+    /// Add double register to HL
+    fn addrr_16(&mut self, reg1: Register, reg2: Register) -> u8 {
+        let value = self.reg.get_double_register(reg1, reg2);
+        let result = self.reg.get_double_register(Register::H, Register::L).wrapping_add(value);
+        self.reg.set_double_register(Register::H, Register::L, result);
+
+        // Set Flags
+        self.reg.set_flag(Flag::SUB, false);
+        self.reg.set_flag(Flag::HC, (result & 0x0FFF) < (value & 0x0FFF));
+        self.reg.set_flag(Flag::CARRY, result > 0xFFFF - value);
+
+        self.reg.pc = self.reg.pc.wrapping_add(1);
+        return 2;
+    }
+
+    // add SP, e
+    /// Add immediate signed value to SP
+    fn addspi(&mut self) -> u8 {
+        let value = self.get_next_byte() as i8;
+        let result = self.reg.sp.wrapping_add(value as u16);
+        self.reg.sp = result;
+
+        // Set Flags
+        self.reg.set_flag(Flag::ZERO, false);
+        self.reg.set_flag(Flag::SUB, false);
+        self.reg.set_flag(Flag::HC, (result & 0x0F) + ((value as u16) & 0x0F) > 0x0F);
+        self.reg.set_flag(Flag::CARRY, (result & 0xFF) + ((value as u16) & 0xFF) > 0xFF);
+
+        self.reg.pc = self.reg.pc.wrapping_add(2);
+        return 4;
+    }
+
+    // inc ss
+    /// Increment Double Register
+    fn incrr16(&mut self, reg1: Register, reg2: Register) -> u8 {
+        self.reg.set_double_register(reg1, reg2, self.reg.get_double_register(reg1, reg2).wrapping_add(1));
+        self.reg.pc = self.reg.pc.wrapping_add(1);
+
+        return 2;
+    }
+
+    // dec ss
+    /// Decrement Double Register
+    fn decrr16(&mut self, reg1: Register, reg2: Register) -> u8 {
+        self.reg.set_double_register(reg1, reg2, self.reg.get_double_register(reg1, reg2).wrapping_sub(1));
+        self.reg.pc = self.reg.pc.wrapping_add(1);
+
+        return 2;
+    }
+    
+// Rotates and Shifts Operations
+    // rlca
+    /// Rotate A left
+    fn rlca() {
+
+    }
+
+    // rla
+    /// Rotate A left through carry
+    fn rla() {
+
+    }
+
+    // rrca
+    /// Rotate A right
+    fn rrca() {
+
+    }
+
+    // rra
+    /// Rotate A right through carry
+    fn rra() {
+
+    }
+
+    // rlc s
+    /// Rotate source left
+    fn rlcr() {
+
+    }
+
+    // rl s
+    /// Rotate source left through carry
+    fn rlr() {
+
+    }
+
+    // rrc s
+    /// Rotate source right
+    fn rrcr() {
+
+    }
+
+    // rr s
+    /// Rotate source right through carry
+    fn rrr() {
+
+    }
+
+    // sla s
+    /// Shift source left
+    fn slar() {
+
+    }
+
+    // sra s
+    /// Shift source right
+    fn srar() {
+
+    }
+
+    // srl s
+    /// Shift source right
+    fn srlr() {
+
+    }
+
+// Bit Operations
+    // bit b, s
+    /// Copy Complements of Given Bit to Zero Flag
+    fn bit() {
+
+    }
+
+    // set b, s
+    /// Set Given Bit
+    fn set_flag() {
+
+    }
+
+    // res b, s
+    /// Reset Given Bit
+    fn res_flag() {
+
+    }
+    
+// Jump Operations
+    // jp nn
+    /// Jump to immediate 16-bit value
+    fn jp() {
+
+    }
+
+    // jp cc, nn
+    /// Conditional Jump to immediate 16-bit value
+    fn jpcc() {
+
+    }
+
+    // jp (HL)
+    /// Jump to address in HL
+    fn jphl() {
+
+    }
+
+    // jr e
+    /// Jump to immediate signed value
+    fn jr() {
+
+    }
+
+    // jr cc, e
+    /// Conditional Jump to immediate signed value
+    fn jrcc() {
+
+    }
+    
+// Call Operations
+    // call nn
+    /// Call immediate 16-bit value
+    fn call() {
+
+    }
+
+    // call cc, nn
+    /// Conditional Call to immediate 16-bit value
+    fn callcc() {
+
+    }
+    
+// Return Operations
+    // ret
+    /// Return from subroutine
+    fn ret() {
+
+    }
+
+    // ret cc
+    /// Conditional Return from subroutine
+    fn retcc() {
+
+    }
+
+    // reti
+    /// Return from interrupt
+    fn reti() {
+
+    }
+    
+// Miscellaneuous
+    // swap s
+    /// Swap Nibles
+    fn swap() {
+
+    }
+
+    // daa
+    /// Decimal Adjust A
+    fn daa() {
+
+    }
+
+    // cpl
+    /// Complement A
+    fn cpl() {
+
+    }
+
+    // ccf
+    /// Complement Carry Flag
+    fn ccf() {
+
+    }
+
+    // scf
+    /// Set Carry Flag
+    fn scf() {
+
+    }
+
+    // nop
+    /// No Operation
+    fn nop() {
+
+    }
+
+    // halt
+    /// Halt CPU
+    fn halt() {
+
+    }
+
+    // stop
+    /// Stop CPU
+    fn stop() {
+
+    }
+
+    // di
+    /// Disable Interrupts
+    fn di() {
+
+    }
+
+    // ei
+    /// Enable Interrupts
+    fn ei() {
+
     }
 
     /// Call subroutinie at address
     fn call(&mut self) {
         let address = self.get_operand_address();
-        self.pc += 3;
+        self.reg.pc = self.reg.pc.wrapping_add(3);
         self.push_pc();
-        self.pc = address;
+        self.reg.pc = address;
     }
 
     /// Call subroutine if carry is set
     fn callc(&mut self) {
         let address = self.get_operand_address();
-        if self.read_flag(Register::CARRY) {
-            self.pc += 3;
+        if self.reg.get_flag(Flag::CARRY) {
+            self.reg.pc = self.reg.pc.wrapping_add(3);
             self.push_pc();
-            self.pc = address;
+            self.reg.pc = address;
         }
         else {
-            self.pc += 3;
+            self.reg.pc = self.reg.pc.wrapping_add(3);
         }
     }
 
     /// Call subroutine if carry is not set
     fn callnc(&mut self) {
         let address = self.get_operand_address();
-        if !(self.read_flag(Register::CARRY)) {
-            self.pc += 3;
+        if !(self.reg.get_flag(Flag::CARRY)) {
+            self.reg.pc = self.reg.pc.wrapping_add(3);
             self.push_pc();
-            self.pc = address;
+            self.reg.pc = address;
         }
         else {
-            self.pc += 3;
+            self.reg.pc = self.reg.pc.wrapping_add(3);
         }
     }
 
     /// Call subroutine if zero is set
     fn callz(&mut self) {
         let address = self.get_operand_address();
-        if self.read_flag(Register::ZERO) {
-            self.pc += 3;
+        if self.reg.get_flag(Flag::ZERO) {
+            self.reg.pc = self.reg.pc.wrapping_add(3);
             self.push_pc();
-            self.pc = address;
+            self.reg.pc = address;
         }
         else {
-            self.pc += 3;
+            self.reg.pc = self.reg.pc.wrapping_add(3);
         }
     }
 
     /// Call subroutine if zero is not set
     fn callnz(&mut self) {
         let address = self.get_operand_address();
-        if !(self.read_flag(Register::ZERO)) {
-            self.pc += 3;
+        if !(self.reg.get_flag(Flag::ZERO)) {
+            self.reg.pc = self.reg.pc.wrapping_add(3);
             self.push_pc();
-            self.pc = address;
+            self.reg.pc = address;
         }
         else {
-            self.pc += 3;
+            self.reg.pc = self.reg.pc.wrapping_add(3);
         }
     }
 
     /// Flip carry flag
     fn ccf(&mut self) {
-        self.write_flag(Register::SUB, false);
-        self.write_flag(Register::HC, false);
-        self.write_flag(Register::CARRY, !self.read_flag(Register::CARRY));
-        self.pc += 1;
-    }
-
-    /// Compare reg with reg_a via reg_a - reg, set Z flag if equal, reg_a is unaffected
-    fn cp(&mut self, reg: Register) {
-        // Calulate result
-        let value = self.read_register(reg);
-        let (result, borrow) = self.read_register(Register::A).overflowing_sub(value);
-
-        // Set Flags
-        self.write_flag(Register::ZERO, result == 0);
-        self.write_flag(Register::SUB, true);
-        self.write_flag(Register::HC, (self.reg_a & 0x0F) < ((value & 0x0F)));
-        self.write_flag(Register::CARRY, borrow);
-
-        // Continue
-        self.pc += 1;
-    }
-
-    /// Compare immediate 8-bit value with reg_a via reg_a - value, set Z flag if equal, reg_a is unaffected
-    fn cpi(&mut self) {
-        // Calulate result
-        let value = self.read_memory(self.pc + 1);
-        let (result, borrow) = self.read_register(Register::A).overflowing_sub(value);
-
-        // Set Flags
-        self.write_flag(Register::ZERO, result == 0);
-        self.write_flag(Register::SUB, true);
-        self.write_flag(Register::HC, (self.reg_a & 0x0F) < ((value & 0x0F)));
-        self.write_flag(Register::CARRY, borrow);
-
-        // Continue
-        self.pc += 1;
+        self.reg.set_flag(Flag::SUB, false);
+        self.reg.set_flag(Flag::HC, false);
+        self.reg.set_flag(Flag::CARRY, !self.reg.get_flag(Flag::CARRY));
+        self.reg.pc = self.reg.pc.wrapping_add(1);
     }
 
     /// Get the one's complement of reg_a
     fn cpl(&mut self) {
-        self.write_register(Register::A, !self.read_register(Register::A));
-        self.write_flag(Register::SUB, true);
-        self.write_flag(Register::HC, true);
-        self.pc += 1;
+        self.reg.set_register(Register::A, !self.reg.get_register(Register::A));
+        self.reg.set_flag(Flag::SUB, true);
+        self.reg.set_flag(Flag::HC, true);
+        self.reg.pc = self.reg.pc.wrapping_add(1);
     }
 
     /// Convert reg_a to binary coded decimal after BDC addition and subtraction
     fn daa(&mut self) {
-        let mut a = self.read_register(Register::A);
+        let mut a = self.reg.get_register(Register::A);
         let mut adjust = 0;
-        let carry = self.read_flag(Register::CARRY);
-        let half_carry = self.read_flag(Register::HC);
+        let carry = self.reg.get_flag(Flag::CARRY);
+        let half_carry = self.reg.get_flag(Flag::HC);
 
-        if self.read_flag(Register::SUB) {
+        if self.reg.get_flag(Register::SUB) {
             if half_carry {
                 adjust |= 0x06;
             }
@@ -920,53 +1468,32 @@ impl CPU {
             a = a.wrapping_add(adjust);
         }
 
-        self.write_register(Register::A, a);
+        self.reg.set_register(Register::A, a);
 
         // Set flags
-        self.write_flag(Register::ZERO, a == 0);
-        self.write_flag(Register::HC, false);
+        self.reg.set_flag(Flag::ZERO, a == 0);
+        self.reg.set_flag(Flag::HC, false);
         if adjust >= 0x60 {
-            self.write_flag(Register::CARRY, true);
+            self.reg.set_flag(Flag::CARRY, true);
         }
-    }
-
-    /// Decrement reg1, if reg2 is Some, decrement reg2
-    fn dec(&mut self, reg1: Register, reg2: Option<Register>) {
-        match reg2 {
-            Some(r2) => {
-                let address = self.get_double_register(reg1, r2);
-                self.write_memory(address, self.read_memory(address).wrapping_sub(1));
-            },
-            None => {
-                let value = self.read_register(reg1).wrapping_sub(1);
-                self.write_register(reg1, value);
-            }
-        }
-
-        // Set Flags
-        self.write_flag(Register::ZERO, self.read_register(reg1) == 0);
-        self.write_flag(Register::SUB, true);
-        self.write_flag(Register::HC, (self.read_register(reg1) & 0x0F) == 0x0F);
-
-        self.pc += 1;
     }
 
     /// Decrement Double Register
     fn dec16(&mut self, reg1: Register, reg2: Register) {
-        self.set_double_register(reg1, reg2, self.get_double_register(reg1, reg2).wrapping_sub(1));
-        self.pc += 1;
+        self.set_double_register(reg1, reg2, self.reg.get_double_register(reg1, reg2).wrapping_sub(1));
+        self.reg.pc = self.reg.pc.wrapping_add(1);
     }
 
     /// Disable Interrupts
     fn di(&mut self) {
         self.ime = false;
-        self.pc += 1;
+        self.reg.pc = self.reg.pc.wrapping_add(1);
     }
 
     /// Enable Interrupts
     fn ei(&mut self) {
         self.ime = true;
-        self.pc += 1;
+        self.reg.pc = self.reg.pc.wrapping_add(1);
     }
 
     /// Halt CPU
@@ -975,30 +1502,11 @@ impl CPU {
         panic!("Implement Halt");
     }
 
-    /// Increment reg1, if reg2 is Some, increment reg2
-    fn inc(&mut self, reg: Register) {
-        let value = self.read_register(reg).wrapping_add(1);
-        self.write_register(reg, value);
-
-        // Set Flags
-        self.write_flag(Register::ZERO, value == 0);
-        self.write_flag(Register::SUB, false);
-        self.write_flag(Register::HC, (self.read_register(reg) & 0x0F) == 0);
-
-        self.pc += 1;
-    }
-
-    /// Increment Double Register
-    fn inc16(&mut self, reg1: Register, reg2: Register) {
-        self.set_double_register(reg1, reg2, self.get_double_register(reg1, reg2).wrapping_add(1));
-        self.pc += 1;
-    }
-
     // JUMP INSTRUCTIONS
     /// Jump to address in next 16 bits
     fn jp(&mut self) {
         let address = self.get_operand_address();
-        self.pc = address;
+        self.reg.pc = address;
 
     }
 
@@ -1006,29 +1514,29 @@ impl CPU {
     fn jpc(&mut self) {
         let address = self.get_operand_address();
 
-        if self.read_flag(Register::CARRY) {
-            self.pc = address;
+        if self.reg.get_flag(Flag::CARRY) {
+            self.reg.pc = address;
         }
         else {
-            self.pc += 3;
+            self.reg.pc = self.reg.pc.wrapping_add(3);
         }
     }
 
     /// Jump to address at HL
     fn jphl(&mut self) {
-        let address = self.get_double_register(Register::H, Register::L);
-        self.pc = address;
+        let address = self.reg.get_double_register(Register::H, Register::L);
+        self.reg.pc = address;
     }
 
     /// Jump if carry is not set
     fn jpnc(&mut self) {
         let address = self.get_operand_address();
 
-        if !(self.read_flag(Register::CARRY)) {
-            self.pc = address;
+        if !(self.reg.get_flag(Flag::CARRY)) {
+            self.reg.pc = address;
         }
         else {
-            self.pc += 3;
+            self.reg.pc = self.reg.pc.wrapping_add(3);
         }
     }
 
@@ -1038,12 +1546,12 @@ impl CPU {
         let address = self.get_operand_address();
 
         // Check Zero Flag
-        if !(self.read_flag(Register::ZERO)) {
-            self.pc = address;
+        if !(self.reg.get_flag(Flag::ZERO)) {
+            self.reg.pc = address;
         }
         else {
             // Increment to next instruction, skip operand
-            self.pc += 3;
+            self.reg.pc = self.reg.pc.wrapping_add(3);
         }
     }
 
@@ -1051,78 +1559,78 @@ impl CPU {
     fn jpz(&mut self) {
         let address = self.get_operand_address();
 
-        if !(self.read_flag(Register::ZERO)) {
-            self.pc = address;
+        if !(self.reg.get_flag(Flag::ZERO)) {
+            self.reg.pc = address;
         }
         else {
-            self.pc += 3;
+            self.reg.pc = self.reg.pc.wrapping_add(3);
         }
     }
 
     /// Jump relative number of steps in next 16 bits
     fn jr(&mut self) {
-        let offset = self.read_memory(self.pc + 1) as i8;
-        self.pc = self.pc.wrapping_add(2).wrapping_add(offset as u16);
+        let offset = self.get_next_byte() as i8;
+        self.reg.pc = self.reg.pc.wrapping_add(2).wrapping_add(offset as u16);
     }
 
     /// Jump relative if carry is set
     fn jrc(&mut self) {
-        let offset = self.read_memory(self.pc + 1) as i8;
-        if self.read_flag(Register::CARRY) {
-            self.pc = self.pc.wrapping_add(2).wrapping_add(offset as u16);
+        let offset = self.get_next_byte() as i8;
+        if self.reg.get_flag(Flag::CARRY) {
+            self.reg.pc = self.reg.pc.wrapping_add(2).wrapping_add(offset as u16);
         }
         else {
-            self.pc += 2;
+            self.reg.pc = self.reg.pc.wrapping_add(2);
         }
     }
 
     /// Jump relative if carry is not set
     fn jrnc(&mut self) {
-        let offset = self.read_memory(self.pc + 1) as i8;
-        if !self.read_flag(Register::CARRY) {
-            self.pc = self.pc.wrapping_add(2).wrapping_add(offset as u16);
+        let offset = self.get_next_byte() as i8;
+        if !self.reg.get_flag(Flag::CARRY) {
+            self.reg.pc = self.reg.pc.wrapping_add(2).wrapping_add(offset as u16);
         }
         else {
-            self.pc += 2;
+            self.reg.pc = self.reg.pc.wrapping_add(2);
         }
     }
 
     /// Jump relative is zero is not set
     fn jrnz(&mut self) {
-        let offset = self.read_memory(self.pc + 1) as i8;
-        if !self.read_flag(Register::ZERO) {
-            self.pc = self.pc.wrapping_add(2).wrapping_add(offset as u16);
+        let offset = self.get_next_byte() as i8;
+        if !self.reg.get_flag(Flag::ZERO) {
+            self.reg.pc = self.reg.pc.wrapping_add(2).wrapping_add(offset as u16);
         } else {
-            self.pc += 2;
+            self.reg.pc = self.reg.pc.wrapping_add(2);
         }
     }
 
     /// Jump relative if zero is set
     fn jrz(&mut self) {
-        let offset = self.read_memory(self.pc + 1) as i8;
-        if self.read_flag(Register::ZERO) {
-            self.pc = self.pc.wrapping_add(2).wrapping_add(offset as u16);
+        let offset = self.get_next_byte() as i8;
+        if self.reg.get_flag(Flag::ZERO) {
+            self.reg.pc = self.reg.pc.wrapping_add(2).wrapping_add(offset as u16);
         }
         else {
-            self.pc += 2;
+            self.reg.pc = self.reg.pc.wrapping_add(2);
         }
     }
 
     /// Load address from two registers into reg_a, if HL, increment or decrement
     fn lda(&mut self, reg1: Register, reg2: Register) {
-        let address = self.get_double_register(reg1, reg2);
+        let address = self.reg.get_double_register(reg1, reg2);
         println!("Address: {:04X}", address);
         let value = self.read_memory(address);
-        self.write_register(Register::A, value);
+        self.reg.set_register(Register::A, value);
 
-        self.pc += 1;
+        self.reg.pc = self.reg.pc.wrapping_add(1);
     }
 
     /// Load contents of (HL) to reg_a, increment/decrement HL
     fn ldahl(&mut self, increment: bool, decrement: bool) {
-        let address = self.get_double_register(Register::H, Register::L);
+        let address = self.reg.get_double_register(Register::H, Register::L);
         let value = self.read_memory(address);
-        self.write_register(Register::A, value);
+        self.reg.set_register(Register::A, value);
 
         if increment {
             self.inc16(Register::H, Register::L);
@@ -1131,12 +1639,12 @@ impl CPU {
             self.dec16(Register::H, Register::L);
         }
 
-        self.pc += 1;
+        self.reg.pc = self.reg.pc.wrapping_add(1);
     }
     
     fn ldhla(&mut self, increment: bool, decrement: bool) {
-        let address = self.get_double_register(Register::H, Register::L);
-        let value = self.read_register(Register::A);
+        let address = self.reg.get_double_register(Register::H, Register::L);
+        let value = self.reg.get_register(Register::A);
         self.write_memory(address, value);
 
         if increment {
@@ -1146,234 +1654,192 @@ impl CPU {
             self.dec16(Register::H, Register::L);
         }
 
-        self.pc += 1;
+        self.reg.pc = self.reg.pc.wrapping_add(1);
     }
 
     /// Store the contents of reg_a into 0xFF00 + a8
     fn lda8_a(&mut self) {
-        let address = 0xFF00 + self.read_memory(self.pc + 1) as u16;
-        self.write_memory(address, self.read_register(Register::A));
-        self.pc += 2;
+        let address = 0xFF00 + self.get_next_byte() as u16;
+        self.write_memory(address, self.reg.get_register(Register::A));
+        self.reg.pc = self.reg.pc.wrapping_add(2);
     }
 
     /// Load the contents of 0xFF00 + a8 into reg_a
     fn lda_a8(&mut self) {
-        let address = 0xFF00 + self.read_memory(self.pc + 1) as u16;
+        let address = 0xFF00 + self.get_next_byte() as u16;
         let value = self.read_memory(address);
-        self.write_register(Register::A, value);
-        self.pc += 2;
+        self.reg.set_register(Register::A, value);
+        self.reg.pc = self.reg.pc.wrapping_add(2);
     }
 
     /// Load contents of reg_a into given address
     fn lda16_a(&mut self) {
         let address = self.get_operand_address();
-        self.write_memory(address, self.read_register(Register::A));
-        self.pc += 3;
+        self.write_memory(address, self.reg.get_register(Register::A));
+        self.reg.pc = self.reg.pc.wrapping_add(3);
     }
 
     /// Load contents of given address into reg_a
     fn lda_a16(&mut self) {
         let address = self.get_operand_address();
         let value = self.read_memory(address);
-        self.write_register(Register::A, value);
-        self.pc += 3;
-    }
-
-    /// Store contents of reg_a in memory location specified by two registers
-    fn ldr_a(&mut self, reg1: Register, reg2: Register) {
-        let address = self.get_double_register(reg1, reg2);
-        println!("Address: {:04X}", address);
-        self.write_memory(address, self.read_register(Register::A));
-
-        self.pc += 1;
+        self.reg.set_register(Register::A, value);
+        self.reg.pc = self.reg.pc.wrapping_add(3);
     }
 
     /// Load reg2 into reg1
     fn ld(&mut self, reg1: Register, reg2: Register) {
         let value;
         if reg2 == Register::HL {
-            let address = self.get_double_register(Register::H, Register::L);
+            let address = self.reg.get_double_register(Register::H, Register::L);
             value = self.read_memory(address);
         }
         else {
-            value = self.read_register(reg2);
+            value = self.reg.get_register(reg2);
         }
 
         if reg1 == Register::HL {
-            let address = self.get_double_register(Register::H, Register::L);
+            let address = self.reg.get_double_register(Register::H, Register::L);
             self.write_memory(address, value);
         }
         else {
-            self.write_register(reg1, value);
+            self.reg.set_register(reg1, value);
         }
-        self.pc += 1;
+        self.reg.pc = self.reg.pc.wrapping_add(1);
     }
 
     /// Store contents of memory specified by c into reg_a
     fn ldac(&mut self) {
-        let address = 0xFF00 + self.read_register(Register::C) as u16;
+        let address = 0xFF00 + self.reg.get_register(Register::C) as u16;
         let value = self.read_memory(address);
-        self.write_register(Register::A, value);
-        self.pc += 1;
+        self.reg.set_register(Register::A, value);
+        self.reg.pc = self.reg.pc.wrapping_add(1);
     }
 
     /// Store contents of reg_a into memory address specified by reg_c
     fn ldca(&mut self) {
-        let address = 0xFF00 + self.read_register(Register::C) as u16;
-        self.write_memory(address, self.read_register(Register::A));
-        self.pc += 1;
+        let address = 0xFF00 + self.reg.get_register(Register::C) as u16;
+        self.write_memory(address, self.reg.get_register(Register::A));
+        self.reg.pc = self.reg.pc.wrapping_add(1);
     }
 
     /// Load immediate 8 bit value into reg
     fn ldi(&mut self, reg: Register) {
         // Get immediate 8 bits
-        let value = self.read_memory(self.pc + 1);
+        let value = self.get_next_byte();
 
         // Load to proper register
-        self.write_register(reg, value);
-        self.pc += 2;
+        self.reg.set_register(reg, value);
+        self.reg.pc = self.reg.pc.wrapping_add(2);
     }
 
     /// Load immediate 16 bit value into regs
-    fn ldi16(&mut self, reg1: Register, reg2: Register) {
+    fn ldi16(&mut self, reg1: Register, reg2: Register) -> u8 {
         // Get immediate 16 bits
-        let low = self.read_memory(self.pc + 1);
-        let high = self.read_memory(self.pc + 2);
+        let word = self.read_next_word();
 
         // Load to proper registers
-        self.write_register(reg2, low);
-        self.write_register(reg1, high);
-        self.pc += 3;
+        self.reg.set_double_register(reg1, reg2, word);
+        self.reg.set_register_16(Register::PC, self.reg.get_register_16(Register::PC).wrapping_add(2));
+        return 3;
     }
 
     /// Load immediate 8 bit value into memory address specified by HL
     fn ldihl(&mut self) {
-        let value = self.read_memory(self.pc + 1);
-        let address = self.get_double_register(Register::H, Register::L);
+        let value = self.get_next_byte();
+        let address = self.reg.get_double_register(Register::H, Register::L);
         self.write_memory(address, value);
-        self.pc += 2;
+        self.reg.pc = self.reg.pc.wrapping_add(2);
     }
 
     /// Add 8-bit signed operand to stack pointer, store result in HL
     fn ldhlsp8(&mut self) {
-        let value = self.read_memory(self.pc + 1) as i8;
-        let result = self.sp.wrapping_add(value as u16);
+        let value = self.get_next_byte() as i8;
+        let result = self.reg.sp.wrapping_add(value as u16);
         self.set_double_register(Register::H, Register::L, result);
 
         // Set Flags
-        self.write_flag(Register::ZERO, false);
-        self.write_flag(Register::SUB, false);
-        self.write_flag(Register::HC, (self.sp & 0x0F) + (value as u16 & 0x0F) > 0x0F);
-        self.write_flag(Register::CARRY, (self.sp & 0xFF) + (value as u16 & 0xFF) > 0xFF);
+        self.reg.set_flag(Flag::ZERO, false);
+        self.reg.set_flag(Flag::SUB, false);
+        self.reg.set_flag(Flag::HC, (self.reg.sp & 0x0F) + (value as u16 & 0x0F) > 0x0F);
+        self.reg.set_flag(Flag::CARRY, (self.reg.sp & 0xFF) + (value as u16 & 0xFF) > 0xFF);
 
-        self.pc += 2;
+        self.reg.pc = self.reg.pc.wrapping_add(2);
     }
 
     /// Load stack pointer to memory
     fn ldisp(&mut self) {
         let address = self.get_operand_address();
-        self.write_memory(address, self.sp as u8);
-        self.write_memory(address + 1, (self.sp >> 8) as u8);
-        self.pc += 3;
+        self.write_memory(address, self.reg.sp as u8);
+        self.write_memory(address + 1, (self.reg.sp >> 8) as u8);
+        self.reg.pc = self.reg.pc.wrapping_add(3);
     }
 
     /// Load immediate pair from memory into the stack pointer
     fn ldspi(&mut self) {
-        let low = self.read_memory(self.pc + 1);
-        let high = self.read_memory(self.pc + 2);
+        let low = self.get_next_byte();
+        let high = self.read_memory(self.reg.pc + 2);
         let address = ((high as u16) << 8) | low as u16;
-        self.sp = address;
-        self.pc += 3;
+        self.reg.sp = address;
+        self.reg.pc = self.reg.pc.wrapping_add(3);
     }
 
     /// Load contents of HL into SP
     fn ldsphl(&mut self) {
-        let value = self.get_double_register(Register::H, Register::L);
-        self.sp = value;
-        self.pc += 1;
+        let value = self.reg.get_double_register(Register::H, Register::L);
+        self.reg.sp = value;
+        self.reg.pc = self.reg.pc.wrapping_add(1);
     }
 
     /// No opperation, continue
-    fn nop(&mut self) {
-        self.pc += 1;
-    }
-
-    /// OR reg with reg_a, store in reg_a
-    fn or(&mut self, reg: Register) {
-        // Calulate result
-        let value = self.read_register(reg);
-        let result = self.read_register(Register::A) | value;
-
-        // Set Flags
-        self.write_flag(Register::ZERO, result == 0);
-        self.write_flag(Register::SUB, false);
-        self.write_flag(Register::HC, false);
-        self.write_flag(Register::CARRY, false);
-
-        // Store result and continue
-        self.write_register(Register::A, result);
-        self.pc += 1;
-    }
-
-    /// OR immediate value with reg_a, store in reg_a
-    fn ori(&mut self) {
-        let value = self.read_memory(self.pc + 1);
-        let result = self.read_register(Register::A) | value;
-
-        // Set Flags
-        self.write_flag(Register::ZERO, result == 0);
-        self.write_flag(Register::SUB, false);
-        self.write_flag(Register::HC, false);
-        self.write_flag(Register::CARRY, false);
-
-        // Store result and continue
-        self.write_register(Register::A, result);
-        self.pc += 1;
+    fn nop(&mut self) -> u8 {
+        self.reg.pc = self.reg.pc.wrapping_add(1);
+        return 1;
     }
 
     /// Pop value from stack into register pair
     fn pop(&mut self, reg1: Register, reg2: Register) {
-        let low = self.mmu.borrow().read_byte(self.sp);
-        self.sp = self.sp.wrapping_add(1);
-        let high = self.mmu.borrow().read_byte(self.sp);
-        self.sp = self.sp.wrapping_add(1);
-        self.write_register(reg1, low);
-        self.write_register(reg2, high);
+        let low = self.mmu.borrow().read_byte(self.reg.sp);
+        self.reg.sp = self.reg.sp.wrapping_add(1);
+        let high = self.mmu.borrow().read_byte(self.reg.sp);
+        self.reg.sp = self.reg.sp.wrapping_add(1);
+        self.reg.set_register(reg1, low);
+        self.reg.set_register(reg2, high);
 
-        self.pc += 1;
+        self.reg.pc = self.reg.pc.wrapping_add(1);
     }
 
     /// Pop value from stack into program counter
     fn pop_pc(&mut self) {
-        let low = self.mmu.borrow().read_byte(self.sp);
-        self.sp = self.sp.wrapping_add(1);
-        let high = self.mmu.borrow().read_byte(self.sp);
-        self.sp = self.sp.wrapping_add(1);
-        self.pc = ((high as u16) << 8) | low as u16;
+        let low = self.mmu.borrow().read_byte(self.reg.sp);
+        self.reg.sp = self.reg.sp.wrapping_add(1);
+        let high = self.mmu.borrow().read_byte(self.reg.sp);
+        self.reg.sp = self.reg.sp.wrapping_add(1);
+        self.reg.pc = ((high as u16) << 8) | low as u16;
     }
 
     /// Push contents of register pair onto stack
     fn push(&mut self, reg1: Register, reg2: Register) {
-        let value = self.get_double_register(reg1, reg2);
+        let value = self.reg.get_double_register(reg1, reg2);
         let high = (value >> 8) as u8;
         let low = value as u8;
-        self.sp = self.sp.wrapping_sub(1);
-        self.mmu.borrow_mut().write_byte(self.sp, high);
-        self.sp = self.sp.wrapping_sub(1);
-        self.mmu.borrow_mut().write_byte(self.sp, low);
+        self.reg.sp = self.reg.sp.wrapping_sub(1);
+        self.mmu.borrow_mut().write_byte(self.reg.sp, high);
+        self.reg.sp = self.reg.sp.wrapping_sub(1);
+        self.mmu.borrow_mut().write_byte(self.reg.sp, low);
 
-        self.pc += 1;
+        self.reg.pc = self.reg.pc.wrapping_add(1);
     }
 
     /// Push program counter onto stack
     fn push_pc(&mut self) {
-        let pc = self.pc;
+        let pc = self.reg.pc;
         let high = (pc >> 8) as u8;
         let low = pc as u8;
-        self.sp = self.sp.wrapping_sub(1);
-        self.mmu.borrow_mut().write_byte(self.sp, high);
-        self.sp = self.sp.wrapping_sub(1);
-        self.mmu.borrow_mut().write_byte(self.sp, low);
+        self.reg.sp = self.reg.sp.wrapping_sub(1);
+        self.mmu.borrow_mut().write_byte(self.reg.sp, high);
+        self.reg.sp = self.reg.sp.wrapping_sub(1);
+        self.mmu.borrow_mut().write_byte(self.reg.sp, low);
     }
 
     /// Return from subroutine
@@ -1383,11 +1849,11 @@ impl CPU {
 
     /// Return if carry flag is set
     fn retc(&mut self) {
-        if self.read_flag(Register::CARRY) {
+        if self.reg.get_flag(Flag::CARRY) {
             self.pop_pc();
         }
         else {
-            self.pc += 1;
+            self.reg.pc = self.reg.pc.wrapping_add(1);
         }
     }
 
@@ -1399,172 +1865,115 @@ impl CPU {
 
     /// Return if carry flag is not set
     fn retnc(&mut self) {
-        if !self.read_flag(Register::CARRY) {
+        if !self.reg.get_flag(Flag::CARRY) {
             self.pop_pc();
         }
         else {
-            self.pc += 1;
+            self.reg.pc = self.reg.pc.wrapping_add(1);
         }
     }
 
     /// Return if zero flag is not set
     fn retnz(&mut self) {
-        if !self.read_flag(Register::ZERO) {
+        if !self.reg.get_flag(Flag::ZERO) {
             self.pop_pc();
         }
         else {
-            self.pc += 1;
+            self.reg.pc = self.reg.pc.wrapping_add(1);
         }
     }
 
     /// Return if zero flag is set
     fn retz(&mut self) {
-        if self.read_flag(Register::ZERO) {
+        if self.reg.get_flag(Flag::ZERO) {
             self.pop_pc();
         }
         else {
-            self.pc += 1;
+            self.reg.pc = self.reg.pc.wrapping_add(1);
         }
     }
 
     /// Rotate reg_a Left through carry
     fn rla(&mut self) {
-        let value = self.read_register(Register::A);
+        let value = self.reg.get_register(Register::A);
         let new_carry = (value & 0x80) >> 7;
-        let result = (value << 1) | self.read_flag(Register::CARRY) as u8;
+        let result = (value << 1) | self.reg.get_flag(Flag::CARRY) as u8;
 
         // Set Flags
-        self.write_flag(Register::ZERO, false);
-        self.write_flag(Register::SUB, false);
-        self.write_flag(Register::HC, false);
-        self.write_flag(Register::CARRY, new_carry == 1);
+        self.reg.set_flag(Flag::ZERO, false);
+        self.reg.set_flag(Flag::SUB, false);
+        self.reg.set_flag(Flag::HC, false);
+        self.reg.set_flag(Flag::CARRY, new_carry == 1);
 
         // Store result and continue
-        self.write_register(Register::A, result);
-        self.pc += 1;
+        self.reg.set_register(Register::A, result);
+        self.reg.pc = self.reg.pc.wrapping_add(1);
     }
     
     /// Rotate reg_a Left 
     fn rlca(&mut self) {
-        let value = self.read_register(Register::A);
+        let value = self.reg.get_register(Register::A);
         let new_carry = (value & 0x80) >> 7;
         let result = (value << 1) | new_carry;
 
         // Set Flags
-        self.write_flag(Register::ZERO, false);
-        self.write_flag(Register::SUB, false);
-        self.write_flag(Register::HC, false);
-        self.write_flag(Register::CARRY, new_carry == 1);
+        self.reg.set_flag(Flag::ZERO, false);
+        self.reg.set_flag(Flag::SUB, false);
+        self.reg.set_flag(Flag::HC, false);
+        self.reg.set_flag(Flag::CARRY, new_carry == 1);
 
         // Store result and continue
-        self.write_register(Register::A, result);
-        self.pc += 1;
+        self.reg.set_register(Register::A, result);
+        self.reg.pc = self.reg.pc.wrapping_add(1);
     }
 
     /// Rotate reg_a Right through carry
     fn rra(&mut self) {
-        let carry = self.read_flag(Register::CARRY);
-        let value = self.read_register(Register::A);
+        let carry = self.reg.get_flag(Flag::CARRY);
+        let value = self.reg.get_register(Register::A);
         let new_carry = value & 0x01;
         let result = (value >> 1) | ((carry as u8) << 7);
 
         // Set Flags
-        self.write_flag(Register::ZERO, false);
-        self.write_flag(Register::SUB, false);
-        self.write_flag(Register::HC, false);
-        self.write_flag(Register::CARRY, new_carry == 1);
+        self.reg.set_flag(Flag::ZERO, false);
+        self.reg.set_flag(Flag::SUB, false);
+        self.reg.set_flag(Flag::HC, false);
+        self.reg.set_flag(Flag::CARRY, new_carry == 1);
 
         // Store result and continue
-        self.write_register(Register::A, result);
-        self.pc += 1;
+        self.reg.set_register(Register::A, result);
+        self.reg.pc = self.reg.pc.wrapping_add(1);
     }
 
     /// Rotate reg_a Right
     fn rrca(&mut self) {
-        let value = self.read_register(Register::A);
+        let value = self.reg.get_register(Register::A);
         let new_carry = value & 0x01;
         let result = (value >> 1) | (new_carry << 7);
 
         // Set Flags
-        self.write_flag(Register::ZERO, false);
-        self.write_flag(Register::SUB, false);
-        self.write_flag(Register::HC, false);
-        self.write_flag(Register::CARRY, new_carry == 1);
+        self.reg.set_flag(Flag::ZERO, false);
+        self.reg.set_flag(Flag::SUB, false);
+        self.reg.set_flag(Flag::HC, false);
+        self.reg.set_flag(Flag::CARRY, new_carry == 1);
 
         // Store result and continue
-        self.write_register(Register::A, result);
-        self.pc += 1;
+        self.reg.set_register(Register::A, result);
+        self.reg.pc = self.reg.pc.wrapping_add(1);
     }
 
     /// Push current counter to stack, jump to address based on the given parameter (0-7)
     fn rst(&mut self, n: u8) {
         self.push_pc();
-        self.pc = (n as u16) * 0x08;
-    }
-
-    /// Sub reg and carry flag from reg_a, store in reg_a
-    fn sbc(&mut self, reg: Register) {
-        // Compute Result
-        let value = self.read_register(reg);        
-        let carry = self.read_flag(Register::CARRY);
-
-        let (result, borrow1) = self.read_register(Register::A).overflowing_sub(value);
-        let (result, borrow2) = result.overflowing_sub(carry as u8);
-
-        // Set flags
-        self.write_flag(Register::ZERO, result == 0);
-        self.write_flag(Register::SUB, true);
-        self.write_flag(Register::HC, (self.reg_a & 0x0F) < ((value & 0x0F) + carry as u8));
-        self.write_flag(Register::CARRY, borrow1 || borrow2);
-
-        // Store result and continue
-        self.write_register(Register::A, result);
-        self.pc += 1;
-    }
-
-    /// Subtract immediate value and carry flag from reg_a
-    fn sbci(&mut self) {
-        // Compute Result
-        let value = self.read_memory(self.pc + 1);        
-        let carry = self.read_flag(Register::CARRY);
-
-        let (result, borrow1) = self.read_register(Register::A).overflowing_sub(value);
-        let (result, borrow2) = result.overflowing_sub(carry as u8);
-
-        // Set flags
-        self.write_flag(Register::ZERO, result == 0);
-        self.write_flag(Register::SUB, true);
-        self.write_flag(Register::HC, (self.reg_a & 0x0F) < ((value & 0x0F) + carry as u8));
-        self.write_flag(Register::CARRY, borrow1 || borrow2);
-
-        // Store result and continue
-        self.write_register(Register::A, result);
-        self.pc += 1;
-    }
-
-    /// Sub reg from reg_a, store in reg_a
-    fn sub(&mut self, reg: Register) {
-        // Compute Result
-        let value = self.read_register(reg);
-        let (result, borrow) = self.read_register(Register::A).overflowing_sub(value);
-
-        // Set flags
-        self.write_flag(Register::ZERO, result == 0);
-        self.write_flag(Register::SUB, true);
-        self.write_flag(Register::HC, self.read_register(Register::A) & 0x0F < value & 0x0F);
-        self.write_flag(Register::CARRY, borrow);
-
-        // Store result and continue
-        self.write_register(Register::A, result);
-        self.pc += 1;
+        self.reg.pc = (n as u16) * 0x08;
     }
 
     /// Set Carry Flag
     fn scf(&mut self) {
-        self.write_flag(Register::SUB, false);
-        self.write_flag(Register::HC, false);
-        self.write_flag(Register::CARRY, true);
-        self.pc += 1;
+        self.reg.set_flag(Flag::SUB, false);
+        self.reg.set_flag(Flag::HC, false);
+        self.reg.set_flag(Flag::CARRY, true);
+        self.reg.pc = self.reg.pc.wrapping_add(1);
     }
 
     /// Stop instruction
@@ -1573,53 +1982,36 @@ impl CPU {
         panic!("Implement Stop");
     }
 
-    /// Subtract and immediate value from reg_a
-    fn subi(&mut self) {
-        let value = self.read_memory(self.pc + 1);
-        let (result, borrow) = self.read_register(Register::A).overflowing_sub(value);
-
-        // Set flags
-        self.write_flag(Register::ZERO, result == 0);
-        self.write_flag(Register::SUB, true);
-        self.write_flag(Register::HC, self.read_register(Register::A) & 0x0F < value & 0x0F);
-        self.write_flag(Register::CARRY, borrow);
-
-        // Store result and continue
-        self.write_register(Register::A, result);
-        self.pc += 1;
+    /// Print out the current state of the CPU
+    pub fn log_state(&self, opcode: u8, pc: u16) {
+        println!(
+            "PC: {:04X}, Opcode: {:02X}, op1: {:02X}, op2: {:02X}, op3: {:02X}\n
+            AF: {:02X}{:02X}, BC: {:02X}{:02X}, DE: {:02X}{:02X}, HL: {:02X}{:02X},\n
+            (AF): {:02X}, (BC): {:02X}, (DE): {:02X} (HL): {:02X} SP: {:04X},\n
+            Z:{} N:{} H:{} C:{}",
+            pc,
+            opcode,
+            self.get_next_byte(),
+            self.read_memory(self.reg.pc + 2),
+            self.read_memory(self.reg.pc + 3),
+            self.reg.get_register(Register::A),
+            self.reg.get_register(Register::F),
+            self.reg.get_register(Register::B),
+            self.reg.get_register(Register::C),
+            self.reg.get_register(Register::D),
+            self.reg.get_register(Register::E),
+            self.reg.get_register(Register::H),
+            self.reg.get_register(Register::L),
+            self.read_memory(self.reg.get_double_register(Register::A, Register::F)),
+            self.read_memory(self.reg.get_double_register(Register::B, Register::C)),
+            self.read_memory(self.reg.get_double_register(Register::D, Register::E)),
+            self.read_memory(self.reg.get_double_register(Register::H, Register::L)),
+            self.reg.sp,
+            self.reg.get_flag(Flag::ZERO),
+            self.reg.get_flag(Register::SUB),
+            self.reg.get_flag(Flag::HC),
+            self.reg.get_flag(Flag::CARRY),
+        );
     }
 
-    /// XOR reg with reg_a, store in reg_a
-    fn xor(&mut self, reg: Register) {
-        // Calulate result
-        let value = self.read_register(reg);
-        let result = self.read_register(Register::A) ^ value;
-
-        // Set Flags
-        self.write_flag(Register::ZERO, result == 0);
-        self.write_flag(Register::SUB, false);
-        self.write_flag(Register::HC, false);
-        self.write_flag(Register::CARRY, false);
-
-        // Store result and continue
-        self.write_register(Register::A, result);
-        self.pc += 1;
-    }
-
-    /// XOR with immediate 8-bit value
-    fn xori(&mut self) {
-        // Calulate result
-        let value = self.read_memory(self.pc + 1);
-        let result = self.read_register(Register::A) ^ value;
-
-        // Set Flags
-        self.write_flag(Register::ZERO, result == 0);
-        self.write_flag(Register::SUB, false);
-        self.write_flag(Register::HC, false);
-        self.write_flag(Register::CARRY, false);
-
-        // Store result and continue
-        self.write_register(Register::A, result);
-        self.pc += 1;
-    }
 }
