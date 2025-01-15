@@ -1550,20 +1550,80 @@ impl CPU {
 // region: Bit Operations
     // bit b, s
     /// Copy Complements of Given Bit to Zero Flag
-    fn bit() {
+    fn bit_r(&mut self, bit: u8, reg: Register) -> u8 {
+        let value = self.reg.get_register(reg);
+        let result = value & (1 << bit);
 
+        // Set Flags
+        self.reg.set_flag(Flag::ZERO, result == 0);
+        self.reg.set_flag(Flag::SUB, false);
+        self.reg.set_flag(Flag::HC, true);
+
+        self.reg.pc = self.reg.pc.wrapping_add(2);
+        return 2;
+    }
+
+    /// Copy complement of given bit in address (HL) to Zero Flag
+    fn bit_hl(&mut self, bit: u8) -> u8 {
+        let adr = self.reg.get_double_register(Register::H, Register::L);
+        let value = self.mmu.borrow().read_byte(adr);
+        let result = value & (1 << bit);
+
+        // Set Flags
+        self.reg.set_flag(Flag::ZERO, result == 0);
+        self.reg.set_flag(Flag::SUB, false);
+        self.reg.set_flag(Flag::HC, true);
+
+        self.reg.pc = self.reg.pc.wrapping_add(2);
+        return 3;
     }
 
     // set b, s
-    /// Set Given Bit
-    fn set_flag() {
+    /// Set Given Bit in Register
+    fn set_bit_r(&mut self, bit: u8, reg: Register) -> u8 {
+        let mut value = self.reg.get_register(reg);
+        value |= 1 << bit;
 
+        self.reg.set_register(reg, value);
+        self.reg.pc = self.reg.pc.wrapping_add(2);
+
+        return 2;
+    }
+
+    /// Set Given Bit in Address (HL)
+    fn set_bit_hl(&mut self, bit: u8) -> u8 {
+        let adr = self.reg.get_double_register(Register::H, Register::L);
+        let mut value = self.mmu.borrow().read_byte(adr);
+        value |= 1 << bit;
+
+        self.mmu.borrow_mut().write_byte(adr, value);
+        self.reg.pc = self.reg.pc.wrapping_add(2);
+
+        return 4;
     }
 
     // res b, s
-    /// Reset Given Bit
-    fn res_flag() {
+    /// Reset Given Bit in register
+    fn res_bit_r(&mut self, bit: u8, reg: Register) -> u8 {
+        let mut value = self.reg.get_register(reg);
+        value &= 0 << bit;
 
+        self.reg.set_register(reg, value);
+        self.reg.pc = self.reg.pc.wrapping_add(2);
+
+        return 2;
+    }
+
+    /// Reset Given Bit in Address (HL)
+    fn res_bit_hl(&mut self, bit: u8) -> u8 {
+        let adr = self.reg.get_double_register(Register::H, Register::L);
+        let mut value = self.mmu.borrow().read_byte(adr);
+        value &= 0 << bit;
+
+        self.mmu.borrow_mut().write_byte(adr, value);
+        self.reg.pc = self.reg.pc.wrapping_add(2);
+
+        return 4;
     }
 // endregion
 
