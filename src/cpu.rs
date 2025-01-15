@@ -602,7 +602,26 @@ impl CPU {
         self.reg.pc = self.reg.pc.wrapping_add(1);
         return 3;
     }
-// endregion
+
+    /// Push PC to stack
+    fn push_pc(&mut self) {
+        self.reg.sp = self.reg.sp.wrapping_sub(1);
+        self.mmu.borrow_mut().write_byte(self.reg.sp, (self.reg.pc >> 8) as u8);
+        self.reg.sp = self.reg.sp.wrapping_sub(1);
+        self.mmu.borrow_mut().write_byte(self.reg.sp, self.reg.pc as u8);
+    }
+
+    /// Pop PC from stack
+    fn pop_pc(&mut self) -> u16 {
+        let value1 = self.mmu.borrow().read_byte(self.reg.sp);
+        self.reg.sp = self.reg.sp.wrapping_add(1);
+        let value2 = self.mmu.borrow().read_byte(self.reg.sp);
+        self.reg.sp = self.reg.sp.wrapping_add(1);
+
+        return ((value1 as u16) << 8) | value2 as u16;
+    }
+
+    // endregion
 
 // region: ALU Operations
     // 8-Bit Operations
@@ -1706,7 +1725,7 @@ impl CPU {
     // RST f
     /// Push present address onto stack and jump to address n
     fn rst(&mut self, n: u8) -> u8 {
-        self.push(Register::PC, Register::PC);
+        self.push_pc();
         self.reg.pc = (n as u16) * 0x08;
 
         return 4;
@@ -1716,20 +1735,31 @@ impl CPU {
 // region: Return Operations
     // ret
     /// Return from subroutine
-    fn ret() {
-
+    fn ret(&mut self) -> u8{
+        self.reg.pc = self.pop_pc();
+        return 4;
     }
 
     // ret cc
     /// Conditional Return from subroutine
-    fn retcc() {
-
+    fn retcc(&mut self, flag: Flag, condition: bool) -> u8 {
+        if self.reg.get_flag(flag) == condition {
+            self.reg.pc = self.pop_pc();
+            return 5;
+        }
+        else {
+            self.reg.pc = self.reg.pc.wrapping_add(1);
+            return 2;
+        }
     }
 
     // reti
     /// Return from interrupt
-    fn reti() {
+    fn reti(&mut self) -> u8 {
+        self.pop_pc();
+        self.ime = true;
 
+        return 4;
     }
 // endregion
 
@@ -1868,27 +1898,6 @@ impl CPU {
     fn nop(&mut self) -> u8 {
         self.reg.pc = self.reg.pc.wrapping_add(1);
         return 1;
-    }
-
-    /// Return from subroutine
-    fn ret(&mut self) {
-        self.pop_pc();
-    }
-
-    /// Return if carry flag is set
-    fn retc(&mut self) {
-        if self.reg.get_flag(Flag::CARRY) {
-            self.pop_pc();
-        }
-        else {
-            self.reg.pc = self.reg.pc.wrapping_add(1);
-        }
-    }
-
-    /// Return from interrupt
-    fn reti(&mut self) {
-        self.pop_pc();
-        self.ime = true;
     }
 
     /// Return if carry flag is not set
