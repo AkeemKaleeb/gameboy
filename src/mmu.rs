@@ -52,6 +52,11 @@ impl MMU {
         }))
     }
 
+    pub fn do_step(&mut self, ticks: u8) -> u8 {
+        self.tick(ticks as u32);
+        1
+    }
+
     /// Read a byte from memory
     pub fn read_byte(&self, address: u16) -> u8 {
         match address {
@@ -85,6 +90,19 @@ impl MMU {
             0xFFFF => self.ie_register = value,
             _ => {}, // Not usable or mirrored regions
         }
+    }
+
+    pub fn write_word(&mut self, address: u16, value: u16) {
+        let low_byte = value as u8;
+        let high_byte = (value >> 8) as u8;
+        self.write_byte(address, low_byte);
+        self.write_byte(address + 1, high_byte);
+    }
+
+    pub fn read_word(&self, address: u16) -> u16 {
+        let low_byte = self.read_byte(address) as u16;
+        let high_byte = self.read_byte(address + 1) as u16;
+        return (high_byte << 8) | low_byte;
     }
 
     /// Load ROM into RAM
@@ -164,17 +182,15 @@ impl MMU {
                 self.write_byte(Self::TIMA, self.read_byte(Self::TIMA.wrapping_add(1)));
                 if self.read_byte(Self::TIMA) == 0 {
                     self.write_byte(Self::TIMA, self.read_byte(Self::TMA));
-                    self.request_interrupt(2);
+                    self.get_interrupts();
                 }
             }
         }
     }
 
     /// Request an interrupt
-    pub fn request_interrupt(&mut self, interrupt: u8) {
-        let mut interrupt_flag = self.read_byte(Self::IF);
-        interrupt_flag |= 1 << interrupt;
-        self.write_byte(Self::IF, interrupt_flag);
+    pub fn get_interrupts(&mut self) {
+        // TODO: Implement
     }
 
     fn handle_serial_transfer(&self) {

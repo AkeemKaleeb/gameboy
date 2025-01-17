@@ -7,6 +7,7 @@ extern crate sdl2;
 mod cpu;
 mod mmu;
 mod ppu;
+mod registers;
 
 use sdl2::pixels::Color;
 use sdl2::event::Event;
